@@ -1,0 +1,8 @@
+# Dependances du logiciel "Automatisation Excel AYA"
+# Installation : pip install -r requirements.txt
+
+openpyxl>=3.1.0          # lecture / ecriture des fichiers Excel (.xlsx, .xlsm)
+customtkinter>=5.2.0     # interface moderne (OPTIONNEL : sans lui, Tkinter standard est utilise)
+
+# Tkinter n'est pas installable avec pip : il est livre avec Python sur Windows et macOS.
+# Sur Linux : sudo apt install python3-tk

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+# fichiers de travail Excel
+~$*.xlsx
+*_TRAITE.xlsx
+*_RAPPORT.xlsx
+*_RAPPORT.txt
+tests/fixtures/
