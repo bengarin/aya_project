@@ -25,7 +25,10 @@ from tkinter import filedialog, messagebox, ttk
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from excel_reader import list_sheet_names                     # noqa: E402
-from logger import CHECK, CREATE, ERROR, KAM_NOT_FOUND, MODIF, RED, STORE_NOT_FOUND  # noqa: E402
+from logger import (                                           # noqa: E402
+    A_VERIFIER, CONFORME, CREEE, DUPLICATE, ERREUR, IGNOREE,
+    KAM_NON_TROUVE, MODIFIEE, ROUGE, STORE_NON_TROUVE,
+)
 from pipeline import PipelineError, Selection, Session        # noqa: E402
 from processor import Options                                 # noqa: E402
 
@@ -55,13 +58,16 @@ COLORS = {
 }
 
 LEVEL_COLORS = {
-    ERROR: "#B71C1C",
-    CHECK: "#E65100",
-    RED: "#C62828",
-    STORE_NOT_FOUND: "#AD1457",
-    KAM_NOT_FOUND: "#6A1B9A",
-    CREATE: "#1B5E20",
-    MODIF: "#1F4E79",
+    ERREUR: "#B71C1C",
+    A_VERIFIER: "#E65100",
+    ROUGE: "#C62828",
+    STORE_NON_TROUVE: "#AD1457",
+    KAM_NON_TROUVE: "#6A1B9A",
+    CREEE: "#1B5E20",
+    MODIFIEE: "#1F4E79",
+    CONFORME: "#5A6270",
+    IGNOREE: "#7A4F01",
+    DUPLICATE: "#00695C",
 }
 
 
@@ -189,11 +195,7 @@ class App:
         self.var_kam_sheet = tk.StringVar(value=AUTO)
         self.var_status = tk.StringVar(value="Selectionnez les 3 fichiers Excel puis lancez l'analyse.")
         self.var_filter = tk.StringVar(value="Tout afficher")
-        self.opt_city = tk.BooleanVar(value=False)
-        self.opt_unknown_div = tk.BooleanVar(value=False)
         self.opt_idaya = tk.BooleanVar(value=False)
-        self.opt_missing_stores = tk.BooleanVar(value=False)
-        self.opt_highlight = tk.BooleanVar(value=False)
         self.stat_vars: dict[str, tk.StringVar] = {}
 
         self._build_ui()
@@ -254,15 +256,11 @@ class App:
         card.pack(fill="x", pady=4)
         inner = tk.Frame(card, bg=COLORS["card"])
         inner.pack(fill="x", padx=14, pady=8)
-        tk.Label(inner, text="2. Options (par defaut : regles metier strictes)", font=FONT_BOLD,
+        tk.Label(inner, text="2. Option", font=FONT_BOLD,
                  bg=COLORS["card"], fg=COLORS["primary"]).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
         options = (
-            (self.opt_city, "Mettre a jour la colonne City depuis la Reference"),
-            (self.opt_unknown_div, "Traiter les divisions non prevues (RAC...) comme des divisions normales"),
-            (self.opt_idaya, "Numeroter automatiquement IDAYA sur les lignes creees"),
-            (self.opt_missing_stores, "Ajouter les magasins de la Reference absents du fichier 2"),
-            (self.opt_highlight, "Surligner en orange les magasins absents de la Reference"),
+            (self.opt_idaya, "Numeroter automatiquement IDAYA (uniquement sur les lignes CREEES)"),
         )
         for index, (var, text) in enumerate(options):
             row, column = 1 + index // 2, index % 2
@@ -311,9 +309,9 @@ class App:
         left.pack_propagate(False)
         tk.Label(left, text="3. Statistiques", font=FONT_BOLD, bg=COLORS["card"], fg=COLORS["primary"]).pack(anchor="w")
         labels = (
-            "Lignes analysees", "Stores traites", "Lignes modifiees", "Lignes deja conformes",
-            "Lignes ajoutees", "Lignes rouges / Store vide", "Stores non trouves",
-            "KAM trouves", "KAM non trouves", "Duplicates evites", "A verifier",
+            "Lignes analysees", "Lignes modifiees", "Lignes deja conformes", "Lignes ajoutees",
+            "Lignes Store vide", "Stores non trouves", "KAM trouves", "KAM non trouves",
+            "Duplicates evites", "A verifier",
         )
         for name in labels:
             row = tk.Frame(left, bg=COLORS["card"])
@@ -402,13 +400,7 @@ class App:
         )
 
     def _options(self) -> Options:
-        return Options(
-            update_city=self.opt_city.get(),
-            process_unknown_divisions=self.opt_unknown_div.get(),
-            auto_number_idaya=self.opt_idaya.get(),
-            add_missing_reference_stores=self.opt_missing_stores.get(),
-            highlight_unknown_stores=self.opt_highlight.get(),
-        )
+        return Options(auto_number_idaya=self.opt_idaya.get())
 
     def _reset_analysis(self) -> None:
         """Toute modification d'un fichier/option invalide l'apercu precedent."""
@@ -548,8 +540,8 @@ class App:
         for label, value in plan.stats.as_pairs():
             if label in self.stat_vars:
                 self.stat_vars[label].set(str(value))
-        self.all_entries = plan.logger.sorted_entries()
-        levels = ["Tout afficher"] + sorted({entry.level for entry in self.all_entries})
+        self.all_entries = plan.logger.display_rows()
+        levels = ["Tout afficher"] + sorted({level for level, _text in self.all_entries})
         self.filter_combo["values"] = levels
         if self.var_filter.get() not in levels:
             self.var_filter.set("Tout afficher")
@@ -557,9 +549,9 @@ class App:
         _set_progress(self.progress, 1.0)
         stats = plan.stats
         self.var_status.set(
-            f"Apercu pret : {stats.updated_rows} ligne(s) a modifier, {stats.created_rows} a creer, "
-            f"{stats.red_rows} ligne(s) rouge(s), {stats.duplicates_avoided} duplicate(s) evite(s), "
-            f"{stats.to_check} point(s) a verifier. Cliquez sur 'Confirmer et generer le fichier'."
+            f"Apercu pret : {stats.lignes_modifiees} ligne(s) a modifier, {stats.lignes_ajoutees} a creer, "
+            f"{stats.lignes_store_vide} ligne(s) rouge(s), {stats.duplicates_evites} duplicate(s) evite(s), "
+            f"{stats.a_verifier} cas a verifier. Cliquez sur 'Confirmer et generer le fichier'."
         )
         _set_state(self.btn_generate, True)   # meme sans modification, l'utilisateur peut generer une copie
 
@@ -568,10 +560,10 @@ class App:
         self.report_text.configure(state="normal")
         self.report_text.delete("1.0", "end")
         shown = 0
-        for entry in self.all_entries:
-            if wanted != "Tout afficher" and entry.level != wanted:
+        for level, text in self.all_entries:
+            if wanted != "Tout afficher" and level != wanted:
                 continue
-            self.report_text.insert("end", entry.as_text() + "\n", entry.level)
+            self.report_text.insert("end", text + "\n", level)
             shown += 1
         if not shown:
             self.report_text.insert("end", "Aucun evenement a afficher.")

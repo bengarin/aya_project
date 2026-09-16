@@ -1,220 +1,191 @@
 # Automatisation Excel AYA
 
-Logiciel de bureau (Windows / macOS / Linux) qui met a jour automatiquement la BDD
-des commissions a partir du fichier Reference des promoteurs et du fichier
-d'affectation des KAM.
+Logiciel de bureau (Windows / macOS / Linux) qui met a jour la BDD des commissions
+a partir du fichier Reference des promoteurs et du fichier d'affectation des KAM.
 
-- **Fichier 1 - Reference** : source de verite (promoteurs, divisions, jours). **Jamais modifie.**
-- **Fichier 2 - BDD a traiter** : le seul fichier corrige. **Jamais ecrase** : un nouveau fichier est cree.
+- **Fichier 1 - Reference** : source de verite. **STRICTEMENT LECTURE SEULE.**
+- **Fichier 2 - BDD PROMOTERS MONTH** : le seul fichier corrige, dans une **copie** (jamais ecrase).
 - **Fichier 3 - Affectation KAM** : sert uniquement a retrouver le KAM. **Jamais modifie.**
+
+Traitement **deterministe** : aucune supposition, aucune donnee inventee, aucun
+ecrasement arbitraire, aucun duplicate base uniquement sur le STORE.
 
 ---
 
-## 1. Installation (etape par etape)
+## 1. Installation
 
-1. Installer **Python 3.10 ou plus** : https://www.python.org/downloads/
-   Sous Windows, cocher **"Add Python to PATH"** pendant l'installation.
-2. Telecharger ce dossier sur l'ordinateur.
-3. Ouvrir un terminal (Windows : touche Windows -> taper `cmd`) dans le dossier du logiciel, puis :
+1. Installer **Python 3.10+** : https://www.python.org/downloads/ (Windows : cocher *Add Python to PATH*).
+2. Dans le dossier du logiciel :
 
 ```bash
 pip install -r requirements.txt
-```
-
-4. Demarrer le logiciel :
-
-```bash
 python main.py
 ```
 
-Sous Windows, on peut aussi **double-cliquer sur `Lancer_Windows.bat`**.
+Windows : double-cliquer sur `Lancer_Windows.bat`. Linux : `sudo apt install python3-tk` si Tkinter manque.
 
-> Linux uniquement : si le message "No module named tkinter" apparait, faire
-> `sudo apt install python3-tk`.
-
----
-
-## 2. Utilisation (interface)
-
-```
-1. Fichiers      -> choisir les 3 fichiers Excel (la feuille est detectee automatiquement,
-                    mais on peut la forcer avec la liste deroulante a droite)
-2. Options       -> a laisser decochees pour appliquer les regles metier strictes
-3. Lancer l'analyse (apercu)  -> AUCUN fichier n'est ecrit, on voit seulement ce qui va se passer
-4. Statistiques + Rapport     -> verifier surtout la ligne "A verifier"
-5. Confirmer et generer le fichier -> choisir le nom du fichier resultat
-6. Ouvrir le fichier resultat / Ouvrir le rapport
-```
-
-Le bouton *Confirmer et generer* n'ecrit jamais par-dessus un des 3 fichiers sources :
-le logiciel refuse et affiche une erreur.
-
-### Mode ligne de commande (optionnel, pour automatiser)
+Mode ligne de commande (automatisation / tests) :
 
 ```bash
-python main.py --cli ^
-  -r "Liste_promoteurs.xlsx" ^
-  -t "BDD_COMMISSIONS_AOUT.xlsx" ^
-  -k "Affectation_des_KAMs.xlsx" ^
-  -o "BDD_COMMISSIONS_AOUT_TRAITE.xlsx"
+python main.py --cli -r Reference.xlsx -t BDD.xlsx -k KAM.xlsx -o Resultat.xlsx
+python main.py --cli ... --preview          # analyse seule, aucun fichier ecrit
+python main.py --cli ... --auto-idaya       # numerote IDAYA sur les lignes creees
 ```
 
-`--preview` = analyse seule, sans ecriture. `python main.py --help` liste toutes les options.
+---
+
+## 2. Structure attendue des fichiers
+
+Les colonnes sont reconnues **par leur nom** (majuscules, accents et espaces ignores).
+Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
+**positions exactes** ci-dessous et le signale dans l'interface.
+
+**Fichier 1 - Reference** - feuille `Feuil2`, en-tetes ligne 1
+| Colonne | C | F | G | H | I | J | L |
+|---|---|---|---|---|---|---|---|
+| Contenu | Divisions | ID Promoter | Store Code | PROMOTER | STORE | CITY | Working Days |
+
+**Fichier 2 - BDD a traiter** - feuille `BDD PROMOTERS MONTH`, en-tetes ligne 1
+| A | B | C | D | E | F | G | H | I | J | K | L | M | N |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Annee | Mois | Division | Division1 | KAM | ID Promoter | Code Store | Promoter | Store | City | STATUT | DAY | IDAYA | Column1 |
+
+**Fichier 3 - Affectation KAM** - une feuille `VD` et une feuille `DA` (colonnes Store et KAM).
 
 ---
 
-## 3. Colonnes obligatoires
+## 3. Regles appliquees (aucune autre)
 
-Les colonnes sont reconnues **par leur nom** (pas par leur position), sans tenir compte
-des majuscules, des accents ni des espaces en trop. Si une colonne obligatoire manque,
-le traitement s'arrete avec un message clair.
+**Ordre de traitement, pour chaque ligne du fichier 2 :**
 
-| Fichier | Colonnes obligatoires |
-|---|---|
-| 1 - Reference | ID Promoter, Store Code, PROMOTER, STORE, Divisions, Working Days |
-| 2 - BDD a traiter | ID Promoter, Code Store, Promoter, Store, Division1, KAM, DAY, Column1 |
-| 3 - Affectation KAM | Store, KAM |
-
-Colonnes facultatives utilisees si elles existent : `CITY`, `Annee`, `Mois`, `Division`,
-`STATUT`, `IDAYA`, `Code store`.
-
----
-
-## 4. Regles appliquees
-
-| # | Regle | Comportement du logiciel |
+| Etape | Regle | Comportement |
 |---|---|---|
-| 1 | **Store vide** | Toute la ligne est coloree en **rouge**. Aucune autre modification, aucune recherche, aucun duplicate. |
-| 2 | Recherche du Store | Comparaison robuste : espaces multiples, majuscules/minuscules, accents, tirets. Une cellule vide n'est jamais un match. |
-| 3 | Donnees reprises de la Reference | `ID Promoter`, `Store Code` -> `Code Store`, `PROMOTER` -> `Promoter`, `Divisions` -> `Division`, division unitaire -> `Division1`, `Working Days` -> `DAY`, cle -> `Column1`. |
-| 4 | `Divisions = VD+DA` | Genere **deux** affectations : une VD et une DA. |
-| 5 | Meme Store sur 2 lignes Reference | Chaque ligne garde **ses propres** informations : jamais de melange VD/DA. |
-| 6 | Cle `Code Store + Division1` | Si la cle existe dans `Column1` -> la ligne est **modifiee**. Sinon -> une ligne est **creee**. |
-| 7 | Duplicates | Une cle n'est jamais creee deux fois. Le compteur "Duplicates evites" indique le nombre de creations evitees. |
-| 8 | KAM | Recherche dans le fichier 3 a partir du Store **et** de la division (voir point 5 ci-dessous). Jamais de recherche si Store est vide. |
-| 9 | Fichier resultat | Toujours un **nouveau** fichier. Les 3 sources restent identiques (verifie par test automatique). |
-| 10 | Cas ambigus | Le logiciel **ne choisit jamais au hasard** : il inscrit la ligne dans le rapport "A VERIFIER". |
+| 1 | **Store (I) vide** | Toute la ligne est coloree en **ROUGE**. Aucune recherche Store / Promoter / ID / Code Store / KAM, aucune creation, aucune modification, aucun remplissage automatique. |
+| 2 | **Store absent de la Reference** | Signale "Store non trouve". Aucune donnee inventee, aucune recherche approchante, ligne laissee intacte. |
+| 3 | **Divisions de la Reference** | `VD`, `DA` et `VD+DA` sont traitees. `VD+DA` = **deux** affectations (VD et DA) traitees separement. Toute autre valeur (ex. `RAC`) va en **A VERIFIER** et n'est jamais transformee en VD ou DA. |
+| 4 | **Meme Store + meme Division avec 2 promoteurs** | **A VERIFIER**. Aucun choix automatique, aucune ligne ecrasee, donnees laissees intactes. |
+| 5 | **Cle de traitement** | `Code Store + Division`. `C003470765VD` et `C003470765DA` sont **deux cles differentes**. Le Store seul ne suffit jamais. |
+| 6 | **Cle presente dans le fichier 2** | La ligne existante est **mise a jour** (jamais de 2e ligne). |
+| 7 | **Cle absente** | Une nouvelle ligne est **creee**. |
+| 8 | **KAM** | Recherche par **Store + Division** (feuille VD ou feuille DA). KAM introuvable = colonne KAM **laissee vide** + signale. Jamais de KAM copie d'une division a l'autre. |
+| 9 | **Column1** | Toujours recalculee : `Code Store + Division1`, uniquement quand le Code Store et la Division viennent de la Reference. Une ancienne valeur fausse est corrigee. |
+| 10 | **IDAYA** | N'est jamais une cle de duplicate. Les IDAYA existants ne sont jamais modifies. L'option de numerotation ne touche que les lignes **creees**. |
 
-### Colonnes jamais modifiees sur une ligne existante
-`Annee`, `Mois`, `City`, `STATUT`, `IDAYA`, `Store` restent tels quels
-(`City` peut etre mise a jour via une option).
+**Colonnes ecrites depuis la Reference** (regles 4 et 5 du cahier des charges) :
+`Division` (C), `Division1` (D), `KAM` (E), `ID Promoter` (F), `Code Store` (G),
+`Promoter` (H), `Store` (I), `City` (J), `DAY` (L), `Column1` (N).
 
----
+**Colonnes jamais modifiees sur une ligne existante** : `Annee` (A), `Mois` (B),
+`STATUT` (K), `IDAYA` (M).
 
-## 5. Points detectes dans vos fichiers reels (a valider)
+### Comment une ligne existante est reconnue
+Dans cet ordre de confiance :
+1. `Code Store (G) + Division1 (D)` — la vraie cle metier ;
+2. la valeur ecrite dans `Column1 (N)` — qui peut etre ancienne ou fausse.
 
-L'analyse des 3 fichiers fournis a revele 4 situations que le cahier des charges ne
-tranchait pas. Aucune regle n'a ete inventee : voici ce qui a ete fait.
-
-1. **Le KAM depend du Store ET de la division.**
-   `Affectation_des_KAMs_VDDA.xlsx` contient 2 feuilles (`VD` et `DA`). Sur les
-   122 magasins presents dans les deux feuilles, **122 ont un KAM different en VD et en DA**
-   (ex. Aswak Assalam Hay Riad : VD = HAZZAZ MEHDI, DA = ABOURACHID HOUSSINE).
-   -> Le logiciel cherche donc le KAM dans la feuille de la division traitee.
-   Si le fichier 3 n'a qu'une seule feuille sans nom de division, la recherche se fait
-   uniquement par Store (comportement decrit dans le cahier des charges).
-   Si le magasin n'existe que dans l'autre division, **le KAM n'est pas recopie** :
-   la valeur existante est conservee et la ligne est signalee.
-
-2. **Division `RAC`.** La Reference contient 6 lignes avec `Divisions = RAC`
-   (Electroplanet Fes, Fes Saiss, Meknes, Nador, Oujda, Tanger), non prevue par les regles.
-   -> Par defaut ces lignes ne sont **pas** traitees et sont listees dans "A VERIFIER".
-   L'option *"Traiter les divisions non prevues"* permet de les traiter comme VD/DA.
-
-3. **Deux promoteurs pour le meme Store + meme division.**
-   Ex. Electroplanet Derb Sultan : 2 lignes `DA` avec 2 promoteurs differents ;
-   Marjane Hay Riad : 2 lignes `VD` et 2 lignes `DA`. La cle `Code Store + Division1`
-   ne peut contenir qu'une seule ligne.
-   -> Le logiciel **ne modifie rien** et inscrit le detail dans "A VERIFIER".
-
-4. **Colonne `Column1` parfois incoherente.** Dans le fichier fourni, 3 lignes ont un
-   `Column1` qui ne correspond pas a `Code Store + Division1` (ex. ligne 68).
-   -> La recherche se fait sur `Column1` **et** sur `Code Store + Division1`, puis en
-   dernier recours sur `Store + Division1`. La cle est ensuite reecrite correctement.
-   Cela evite de creer un doublon a cause d'une cle fausse.
+C'est ce qui permet de corriger une `Column1` erronee (regle 12) sans creer de doublon.
 
 ---
 
-## 6. Options (toutes decochees par defaut)
+## 4. Statistiques (definitions exactes)
 
-| Option | Effet |
+| Statistique | Definition |
 |---|---|
-| Mettre a jour la colonne City | Recopie `CITY` de la Reference dans `City`. |
-| Traiter les divisions non prevues (RAC...) | Traite toute valeur de `Divisions` comme une division normale. |
-| Numeroter automatiquement IDAYA | Les lignes creees recoivent le numero suivant. Sinon `IDAYA` reste vide et est signale. |
-| Ajouter les magasins de la Reference absents du fichier 2 | Ajoute les affectations des magasins qui n'apparaissent pas du tout dans le fichier 2 (93 magasins dans vos fichiers). **Hors regles du cahier des charges.** |
-| Surligner en orange les magasins absents de la Reference | Aide visuelle, aucune donnee modifiee. |
+| Lignes analysees | Nombre de lignes de donnees du fichier 2. |
+| Lignes modifiees | Lignes existantes dont au moins une cellule a change. |
+| Lignes deja conformes | Cle trouvee, valeurs deja identiques a la Reference. |
+| Lignes ajoutees | Nouvelles lignes creees (cle absente du fichier 2). |
+| Lignes Store vide | Lignes colorees en rouge. |
+| Stores non trouves | Nombre de **magasins** du fichier 2 absents de la Reference. |
+| KAM trouves / non trouves | Par affectation traitee (Store + Division). |
+| **Duplicates evites** | **Uniquement** les creations annulees parce que la combinaison `Code Store + Division` avait deja ete traitee. Ce n'est jamais le nombre de lignes traitees. |
+| A verifier | Cas ambigus que le logiciel refuse de trancher. |
+
+---
+
+## 5. Rapport : pourquoi chaque ligne a ete traitee ainsi
+
+Le rapport (`..._RAPPORT.txt` et `..._RAPPORT.xlsx`) contient **une decision par ligne**
+du fichier 2, avec la raison et le detail des cellules changees :
+
+| Decision | Signification |
+|---|---|
+| `ROUGE` | Store vide -> coloration uniquement. |
+| `MODIFIEE` | Cle presente -> ligne mise a jour (liste des cellules et anciennes valeurs). |
+| `CONFORME` | Cle presente, deja identique a la Reference. |
+| `CREEE` | Cle absente -> nouvelle ligne (source Reference indiquee). |
+| `STORE NON TROUVE` | Store absent de la Reference. |
+| `A VERIFIER` | RAC, 2 promoteurs pour la meme cle, cle en double dans le fichier 2... |
+| `IGNOREE` | Ligne du fichier 2 sans affectation correspondante dans la Reference. |
+
+---
+
+## 6. Les 3 points ou les regles ne disent rien (choix documentes)
+
+1. **Colonne `Division` (C) quand la Reference vaut `VD+DA`** : la valeur brute
+   `VD+DA` est ecrite en C et la division reelle (`VD` ou `DA`) en D (`Division1`).
+   Pour une Reference `VD` ou `DA`, C et D contiennent la meme valeur, comme exige.
+2. **`Annee`, `Mois`, `STATUT` d'une ligne CREEE** : la Reference ne les contient pas.
+   Ils sont recopies depuis la ligne du **meme Code Store** deja presente dans le
+   fichier 2 ; s'il n'y en a pas, ils restent vides et la ligne passe en `A VERIFIER`.
+   Le rapport indique toujours la ligne source.
+3. **`KAM` introuvable** : la colonne est **videe** (regle 11 : "ne pas inventer,
+   laisser vide, signaler"). L'ancienne valeur, non justifiee par le fichier 3,
+   n'est pas conservee.
 
 ---
 
 ## 7. Ce qui est conserve dans le fichier resultat
 
-Conserve : toutes les feuilles (y compris masquees), les valeurs, les **formules**,
-les couleurs, les polices, les bordures, les largeurs de colonnes, les volets figes,
-les tableaux Excel (agrandis automatiquement quand des lignes sont ajoutees),
-les filtres automatiques et les mises en forme conditionnelles.
+Conserve : toutes les feuilles (y compris masquees), valeurs, **formules**, couleurs,
+polices, bordures, largeurs, volets figes, tableaux Excel (agrandis lors d'un ajout de
+ligne), filtres automatiques et mises en forme conditionnelles.
 
-Non conserve (limite de la bibliotheque openpyxl, signale par le logiciel au chargement) :
-connexions de donnees externes / Power Query, tableaux croises dynamiques, graphiques,
-images, segments, parametres d'impression, vues de feuille nommees.
-Les valeurs **calculees** des formules sont recalculees par Excel a l'ouverture.
-
-> Si le fichier 2 contient une de ces fonctionnalites, faites une copie de securite
-> avant de remplacer votre fichier de travail par le fichier resultat.
+Non conserve (limite d'openpyxl, signale au chargement) : connexions de donnees
+externes / Power Query, tableaux croises dynamiques, graphiques, images, segments,
+parametres d'impression, vues de feuille nommees. Les resultats des formules sont
+recalcules par Excel a l'ouverture.
 
 ---
 
-## 8. Rapport de traitement
-
-A cote du fichier resultat, deux rapports sont crees :
-`..._RAPPORT.txt` (lecture rapide) et `..._RAPPORT.xlsx` (filtrable dans Excel).
-
-Categories : `MODIFICATION`, `CREATION`, `LIGNE ROUGE`, `STORE INTROUVABLE`,
-`KAM INTROUVABLE`, `DUPLICATE EVITE`, `A VERIFIER`, `ERREUR`.
-
-**Regardez toujours la categorie `A VERIFIER` en premier** : ce sont les situations que
-le logiciel a refuse de trancher tout seul.
-
----
-
-## 9. Architecture du code
+## 8. Architecture
 
 ```
 main.py            point d'entree (interface ou ligne de commande)
-gui.py             interface graphique (CustomTkinter, repli Tkinter)
-pipeline.py        chef d'orchestre : lecture -> analyse -> ecriture
-excel_reader.py    lecture des 3 fichiers, detection des feuilles et des colonnes
-matcher.py         nettoyage et comparaison des textes, cles, divisions
-kam_service.py     recherche du KAM (par Store + division)
-processor.py       REGLES METIER (ne touche jamais a Excel : produit un plan)
-excel_writer.py    application du plan et enregistrement du nouveau fichier
-logger.py          rapport de traitement (.txt et .xlsx)
-tests/             fichiers Excel de test + 22 tests automatiques
+gui.py             interface CustomTkinter (repli Tkinter)
+pipeline.py        orchestration : lecture -> analyse -> ecriture
+excel_reader.py    lecture, detection des feuilles/colonnes (nom puis position)
+matcher.py         normalisation des textes, cles, divisions
+kam_service.py     recherche du KAM par Store + Division
+processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
+excel_writer.py    application du plan, ecriture d'un nouveau fichier
+logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
+tests/             fixtures Excel + 25 tests automatiques
 ```
-
-Le decoupage garantit qu'une regle metier se corrige dans `processor.py` uniquement,
-sans toucher a l'interface ni a l'ecriture Excel.
 
 ---
 
-## 10. Tests
+## 9. Tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-22 tests couvrent : detection des colonnes, ligne rouge, VD+DA, duplicates, conflits,
-division inconnue, KAM par division, non-modification des sources, conservation de la
-mise en forme, idempotence (relancer le traitement ne change plus rien) et les options.
+25 tests, dont les **10 cas obligatoires** :
+Store vide - Store non trouve - Store+VD existant - Store+DA existant -
+VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
+KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
+Plus : RAC non traite, KAM vide si introuvable, colonnes jamais touchees, statistiques
+exactes, rapport explicatif, sources non modifiees, mise en forme conservee,
+detection par position quand les en-tetes sont illisibles.
 
 ---
 
-## 11. Problemes frequents
+## 10. Problemes frequents
 
 | Message | Solution |
 |---|---|
 | `No module named openpyxl` | `pip install -r requirements.txt` |
-| `No module named tkinter` | Windows/macOS : reinstaller Python ; Linux : `sudo apt install python3-tk` |
-| `aucune feuille ne contient les colonnes obligatoires` | Verifier l'orthographe des en-tetes, ou choisir la feuille manuellement dans la liste deroulante. |
-| `le fichier est peut-etre ouvert dans Excel` | Fermer le fichier resultat dans Excel puis relancer la generation. |
-| Le traitement semble long | Normal : un classeur de plusieurs Mo met quelques secondes a s'ouvrir. La barre de progression avance ensuite. |
+| `No module named tkinter` | Linux : `sudo apt install python3-tk` |
+| `aucune feuille ne contient les colonnes obligatoires` | Choisir la feuille dans la liste deroulante, ou verifier les en-tetes. |
+| `le fichier est peut-etre ouvert dans Excel` | Fermer le fichier resultat puis relancer. |

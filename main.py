@@ -40,26 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kam-sheets", nargs="*", help="forcer les feuilles du fichier 3")
     parser.add_argument("--preview", action="store_true", help="analyser seulement, sans generer le fichier")
     parser.add_argument("--no-report", action="store_true", help="ne pas generer le rapport a cote du resultat")
-    parser.add_argument("--update-city", action="store_true", help="mettre a jour la colonne City depuis la Reference")
-    parser.add_argument("--process-unknown-divisions", action="store_true",
-                        help="traiter les divisions non prevues (RAC...) comme des divisions normales")
-    parser.add_argument("--auto-idaya", action="store_true", help="numeroter IDAYA sur les lignes creees")
-    parser.add_argument("--add-missing-stores", action="store_true",
-                        help="ajouter les magasins presents dans la Reference et absents du fichier 2")
-    parser.add_argument("--highlight-unknown-stores", action="store_true",
-                        help="surligner en orange les magasins absents de la Reference")
+    parser.add_argument("--auto-idaya", action="store_true",
+                        help="numeroter automatiquement IDAYA sur les lignes CREEES uniquement")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {VERSION}")
     return parser
 
 
 def options_from_args(args) -> Options:
-    return Options(
-        update_city=args.update_city,
-        process_unknown_divisions=args.process_unknown_divisions,
-        auto_number_idaya=args.auto_idaya,
-        add_missing_reference_stores=args.add_missing_stores,
-        highlight_unknown_stores=args.highlight_unknown_stores,
-    )
+    return Options(auto_number_idaya=args.auto_idaya)
 
 
 def run_cli(args) -> int:

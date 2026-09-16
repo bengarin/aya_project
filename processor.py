@@ -1,44 +1,54 @@
 """
 processor.py
 ------------
-Le CERVEAU du logiciel : toutes les regles metier sont ici.
+LES REGLES METIER, et rien d'autre.
 
-Tres important : ce fichier ne touche PAS a Excel. Il lit des donnees deja
-chargees et il fabrique un "plan de travail" :
-   - quelles lignes modifier (et quelles cellules exactement),
-   - quelles lignes creer,
-   - quelles lignes colorer en rouge.
+Ce fichier ne touche jamais a Excel : il lit les donnees deja chargees et
+fabrique un PLAN (quoi modifier, quoi creer, quoi colorer en rouge) ainsi que
+la decision + la raison pour CHAQUE ligne du fichier 2.
 
-C'est ce plan qui permet l'apercu (mode Preview) AVANT d'ecrire le fichier.
+Ordre de traitement impose (regle 17) :
+  1. Store vide            -> rouge uniquement, STOP
+  2. Store introuvable     -> signaler, STOP
+  3. Analyser Divisions de la Reference (VD / DA / VD+DA ; RAC = a verifier)
+  4. Pour chaque division : cle = Code Store + Division
+  5. Cle presente -> UPDATE ; cle absente -> CREATE
+  6. KAM cherche avec Store + Division
+  7. Column1 recalculee = Code Store + Division1
 """
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable
 
 from excel_reader import ReferenceData, ReferenceRow, TargetData, TargetRow
 from kam_service import AMBIGUOUS, KamService, NOT_FOUND, WRONG_DIVISION
 from logger import (
-    CHECK, CREATE, DUPLICATE, KAM_NOT_FOUND, MODIF,
-    ProcessLogger, RED, STORE_NOT_FOUND,
+    A_VERIFIER, CONFORME, CREEE, DUPLICATE, IGNOREE, KAM_NON_TROUVE,
+    MODIFIEE, ProcessLogger, ROUGE, STORE_NON_TROUVE,
 )
-from matcher import KNOWN_DIVISIONS, build_key, norm_division, norm_key, norm_store
+from matcher import build_key, norm_division, norm_store, split_divisions
 
-# Colonnes du fichier 2 alimentees depuis la Reference (regle 4).
-FIELDS_FROM_REFERENCE = ("ID Promoter", "Code Store", "Promoter", "Division", "Division1", "DAY", "Column1")
+# Les seules divisions traitees automatiquement (regle 3).
+DIVISIONS_TRAITEES = ("VD", "DA")
+
+# Colonnes du fichier 2 alimentees depuis la Reference (regles 4 et 5).
+#   Division (C), Division1 (D), KAM (E), ID Promoter (F), Code Store (G),
+#   Promoter (H), Store (I), City (J), DAY (L), Column1 (N)
+COLONNES_ECRITES = ("Division", "Division1", "KAM", "ID Promoter", "Code Store",
+                    "Promoter", "Store", "City", "DAY", "Column1")
+
+# Colonnes jamais modifiees sur une ligne existante : Annee (A), Mois (B),
+# STATUT (K), IDAYA (M) -> regle 13 et "ne rien inventer".
+COLONNES_NON_TOUCHEES = ("Annee", "Mois", "STATUT", "IDAYA")
 
 
 @dataclass
 class Options:
-    """Options du traitement. Par defaut = regles metier strictes."""
+    """Seule option prevue par les regles (regle 13)."""
 
-    update_city: bool = False                   # mettre a jour City depuis la Reference
-    process_unknown_divisions: bool = False     # traiter RAC / autres comme une division normale
-    auto_number_idaya: bool = False             # numeroter IDAYA sur les lignes creees
-    add_missing_reference_stores: bool = False  # ajouter les stores de la Reference absents du fichier 2
-    highlight_unknown_stores: bool = False      # surligner en orange les stores absents de la Reference
+    auto_number_idaya: bool = False
 
 
 @dataclass
@@ -47,59 +57,59 @@ class CellChange:
     old: str
     new: str
 
+    def as_text(self) -> str:
+        return f"{self.column}: '{self.old}' -> '{self.new}'"
+
 
 @dataclass
 class RowUpdate:
     row: int
     store: str
     division: str
+    key: str
     changes: list[CellChange]
-    values: dict[str, str]
 
 
 @dataclass
 class RowCreation:
     store: str
     division: str
+    key: str
     values: dict[str, str]
     template_row: int | None
-    origin: str = ""                            # d'ou vient la creation (info rapport)
 
 
 @dataclass
 class RowMark:
     row: int
     reason: str
-    kind: str = "red"                           # "red" ou "orange"
 
 
 @dataclass
 class Stats:
-    analyzed_rows: int = 0
-    stores_processed: int = 0
-    updated_rows: int = 0
-    unchanged_rows: int = 0
-    created_rows: int = 0
-    red_rows: int = 0
-    store_not_found: int = 0
-    kam_found: int = 0
-    kam_not_found: int = 0
-    duplicates_avoided: int = 0
-    to_check: int = 0
+    lignes_analysees: int = 0
+    lignes_modifiees: int = 0
+    lignes_conformes: int = 0
+    lignes_ajoutees: int = 0
+    lignes_store_vide: int = 0
+    stores_non_trouves: int = 0
+    kam_trouves: int = 0
+    kam_non_trouves: int = 0
+    duplicates_evites: int = 0
+    a_verifier: int = 0
 
     def as_pairs(self) -> list[tuple[str, int]]:
         return [
-            ("Lignes analysees", self.analyzed_rows),
-            ("Stores traites", self.stores_processed),
-            ("Lignes modifiees", self.updated_rows),
-            ("Lignes deja conformes", self.unchanged_rows),
-            ("Lignes ajoutees", self.created_rows),
-            ("Lignes rouges / Store vide", self.red_rows),
-            ("Stores non trouves", self.store_not_found),
-            ("KAM trouves", self.kam_found),
-            ("KAM non trouves", self.kam_not_found),
-            ("Duplicates evites", self.duplicates_avoided),
-            ("A verifier", self.to_check),
+            ("Lignes analysees", self.lignes_analysees),
+            ("Lignes modifiees", self.lignes_modifiees),
+            ("Lignes deja conformes", self.lignes_conformes),
+            ("Lignes ajoutees", self.lignes_ajoutees),
+            ("Lignes Store vide", self.lignes_store_vide),
+            ("Stores non trouves", self.stores_non_trouves),
+            ("KAM trouves", self.kam_trouves),
+            ("KAM non trouves", self.kam_non_trouves),
+            ("Duplicates evites", self.duplicates_evites),
+            ("A verifier", self.a_verifier),
         ]
 
 
@@ -117,8 +127,6 @@ class Plan:
 
 
 class Processor:
-    """Applique les regles metier et produit un Plan."""
-
     def __init__(
         self,
         reference: ReferenceData,
@@ -134,377 +142,367 @@ class Processor:
         self.log = logger or ProcessLogger()
         self.plan = Plan(logger=self.log)
 
-        # Index de travail
-        self._key_index: dict[str, list[int]] = {}
         self._rows_by_number: dict[int, TargetRow] = {}
         self._rows_by_store: dict[str, list[TargetRow]] = {}
-        self._consumed_rows: set[int] = set()
-        self._planned_keys: set[str] = set()
+        self._rows_by_cells: dict[str, list[TargetRow]] = {}     # Code Store (G) + Division1 (D)
+        self._rows_by_column1: dict[str, list[TargetRow]] = {}   # valeur ecrite dans Column1 (N)
+        self._decided_rows: set[int] = set()     # lignes qui ont deja leur decision
+        self._used_rows: set[int] = set()        # lignes deja rattachees a une cle
+        self._keys_traitees: set[str] = set()    # cles deja traitees (update ou create)
         self._build_indexes()
 
     # ------------------------------------------------------------------
-    # Indexation du fichier 2
+    # Index du fichier 2
     # ------------------------------------------------------------------
     def _build_indexes(self) -> None:
+        """Indexe les lignes du fichier 2 par Store et par cle Code Store + Division.
+
+        La cle d'une ligne existante est reconnue de 2 facons (regles 8 et 12),
+        et dans CET ordre de confiance :
+          1. Code Store (G) + Division1 (D)  <- la vraie cle metier,
+          2. la valeur ecrite dans Column1 (N) <- peut etre ancienne/fausse.
+        """
         for trow in self.target.rows:
             self._rows_by_number[trow.row] = trow
             store_key = norm_store(trow.get("Store"))
             if store_key:
                 self._rows_by_store.setdefault(store_key, []).append(trow)
+            cells_key = build_key(trow.get("Code Store"), trow.get("Division1"))
+            if cells_key:
+                self._rows_by_cells.setdefault(cells_key, []).append(trow)
+            column1 = build_key(trow.get("Column1"), "")
+            if column1 and column1 != cells_key:
+                self._rows_by_column1.setdefault(column1, []).append(trow)
 
-            # Cle 1 : valeur de Column1 telle qu'elle existe dans le fichier
-            column1 = norm_key(trow.get("Column1"))
-            if column1:
-                self._key_index.setdefault(column1, []).append(trow.row)
-            # Cle 2 : reconstruite depuis les cellules Code Store + Division1
-            rebuilt = build_key(trow.get("Code Store"), trow.get("Division1"))
-            if rebuilt and rebuilt != column1:
-                self._key_index.setdefault(rebuilt, []).append(trow.row)
+        numbers = [int(r.get("IDAYA")) for r in self.target.rows if r.get("IDAYA").strip().isdigit()]
+        self._next_idaya = (max(numbers) + 1) if numbers else 1
 
-        # Valeurs les plus frequentes : servent de valeur par defaut pour les lignes creees
-        self._dominant: dict[str, str] = {}
-        for name in ("Annee", "Mois", "STATUT"):
-            values = [r.get(name) for r in self.target.rows if r.get(name)]
-            if values:
-                self._dominant[name] = Counter(values).most_common(1)[0][0]
-
-        idaya_numbers = []
-        for r in self.target.rows:
-            raw = r.get("IDAYA").replace(" ", "")
-            if raw.isdigit():
-                idaya_numbers.append(int(raw))
-        self._next_idaya = (max(idaya_numbers) + 1) if idaya_numbers else 1
+    def _candidates_for_key(self, key: str) -> list[TargetRow]:
+        """Lignes libres portant cette cle : d'abord Code Store + Division1, puis Column1."""
+        for index in (self._rows_by_cells, self._rows_by_column1):
+            rows = [t for t in index.get(key, []) if t.row not in self._used_rows]
+            if rows:
+                return rows
+        return []
 
     # ------------------------------------------------------------------
-    # Traitement principal
+    # Boucle principale : une ligne du fichier 2 a la fois (regle 17)
     # ------------------------------------------------------------------
     def run(self, progress: Callable[[int, int], None] | None = None) -> Plan:
         rows = self.target.rows
         total = max(len(rows), 1)
-        processed_stores: set[str] = set()
+        stores_traites: set[str] = set()
 
         for index, trow in enumerate(rows, start=1):
-            self.plan.stats.analyzed_rows += 1
+            self.plan.stats.lignes_analysees += 1
 
-            # ---- ETAPE 1 : Store vide -> ligne rouge, rien d'autre (regle 2)
+            # STEP 1 : Store vide -> ROUGE uniquement, aucun traitement (regle 2)
             if not trow.get("Store").strip():
-                self.plan.marks.append(RowMark(row=trow.row, reason="Store vide", kind="red"))
-                self.plan.stats.red_rows += 1
-                self.log.log(RED, "Store vide -> ligne coloree en rouge, aucune autre modification", row=trow.row)
-                self._consumed_rows.add(trow.row)
+                self.plan.marks.append(RowMark(row=trow.row, reason="Store vide"))
+                self.plan.stats.lignes_store_vide += 1
+                self._decide(
+                    ROUGE, trow.row,
+                    reason="Colonne Store (I) vide : aucune recherche, aucune modification, aucune creation.",
+                    details="Seule action autorisee : coloration de toute la ligne en rouge.",
+                )
                 if progress:
                     progress(index, total)
                 continue
 
             store_key = norm_store(trow.get("Store"))
-            if store_key not in processed_stores:
-                processed_stores.add(store_key)
-                self._process_store(store_key, trow.get("Store"), trow.row)
+            if store_key not in stores_traites:
+                stores_traites.add(store_key)
+                self._traiter_store(store_key, trow.get("Store").strip())
             if progress:
                 progress(index, total)
 
-        # ---- Option : ajouter les magasins de la Reference absents du fichier 2
-        if self.options.add_missing_reference_stores:
-            self._process_missing_reference_stores()
-
-        self._report_orphan_rows()
-        self.plan.stats.stores_processed = len(processed_stores)
+        self._decider_lignes_restantes()
         return self.plan
 
     # ------------------------------------------------------------------
-    def _process_store(self, store_key: str, store_label: str, first_row: int) -> None:
-        """Traite toutes les affectations (divisions) d'un magasin."""
-        entries = self.reference.by_store.get(store_key, [])
-        if not entries:
-            # Regle 16 : on signale, on ne modifie rien.
-            rows = self._rows_by_store.get(store_key, [])
-            for trow in rows:
-                self.plan.stats.store_not_found += 1
-                self.log.log(
-                    STORE_NOT_FOUND,
-                    "Store absent du fichier Reference -> ligne non modifiee",
-                    row=trow.row, store=store_label,
+    def _traiter_store(self, store_key: str, store_label: str) -> None:
+        lignes_du_store = self._rows_by_store.get(store_key, [])
+
+        # STEP 2 : Store introuvable dans la Reference (regle 16)
+        refs = self.reference.by_store.get(store_key, [])
+        if not refs:
+            self.plan.stats.stores_non_trouves += 1
+            for trow in lignes_du_store:
+                self._decide(
+                    STORE_NON_TROUVE, trow.row, store=store_label,
+                    division=trow.get("Division1"),
+                    reason=f"Store '{store_label}' absent du fichier Reference : "
+                           "aucune donnee inventee, aucune recherche approchante, ligne laissee intacte.",
                 )
-                self._consumed_rows.add(trow.row)
-                if self.options.highlight_unknown_stores:
-                    self.plan.marks.append(RowMark(row=trow.row, reason="Store absent de la Reference", kind="orange"))
+                self._used_rows.add(trow.row)
             return
 
-        # Regroupement par division : 'VD+DA' compte pour VD et pour DA (regle 6)
-        by_division: dict[str, list[ReferenceRow]] = {}
-        for entry in entries:
-            if not entry.divisions:
-                self.plan.stats.to_check += 1
-                self.log.check(
-                    f"Colonne 'Divisions' vide dans la Reference (ligne {entry.source_row}) -> affectation ignoree",
-                    row=first_row, store=store_label,
+        # STEP 3 et 4 : eclatement des Divisions de la Reference
+        par_division: dict[str, list[ReferenceRow]] = {}
+        for entry in refs:
+            divisions = split_divisions(entry.divisions_raw)
+            if not divisions:
+                self._verifier(
+                    store_label, "", "",
+                    f"Colonne Divisions vide dans la Reference (ligne {entry.source_row}) : "
+                    "affectation non traitee.",
                 )
                 continue
-            for division in entry.divisions:
-                by_division.setdefault(division, []).append(entry)
+            for division in divisions:
+                par_division.setdefault(division, []).append(entry)
 
-        for division in sorted(by_division):
-            candidates = by_division[division]
+        for division in sorted(par_division):
+            entries = par_division[division]
 
-            # Division non prevue par les regles (ex: 'RAC')
-            if division not in KNOWN_DIVISIONS and not self.options.process_unknown_divisions:
-                self.plan.stats.to_check += 1
-                self.log.check(
-                    f"Division '{division}' non prevue par les regles metier "
-                    f"(Reference ligne(s) {', '.join(str(e.source_row) for e in candidates)}) -> non traitee",
-                    row=first_row, store=store_label, division=division,
+            # Regle 3 : RAC (ou toute autre valeur) n'est jamais traite comme VD ou DA
+            if division not in DIVISIONS_TRAITEES:
+                lignes = self._lignes_candidates(entries, division, store_key)
+                self._verifier(
+                    store_label, division,
+                    build_key(entries[0].store_code, division),
+                    f"Division '{division}' non prevue par les regles (seules VD et DA sont traitees) : "
+                    "aucune donnee ecrite, aucune transformation en VD ou DA.",
+                    rows=[t.row for t in lignes],
+                    details="Reference ligne(s) " + ", ".join(str(e.source_row) for e in entries),
                 )
-                for ref_row in candidates:
-                    self._skip_rows(build_key(ref_row.store_code, division), store_key, division)
                 continue
 
-            # Plusieurs lignes Reference pour la MEME division : on ne choisit pas au hasard (regle 20)
-            unique = {
-                (e.id_promoter, e.store_code, e.promoter, e.working_days, e.divisions_raw): e
-                for e in candidates
+            # Regle 7 : meme Store + meme Division avec plusieurs promoteurs -> A VERIFIER
+            distinctes = {
+                (e.id_promoter, e.store_code, e.promoter, e.working_days, e.city, e.divisions_raw): e
+                for e in entries
             }
-            if len(unique) > 1:
-                self.plan.stats.to_check += 1
+            if len(distinctes) > 1:
+                lignes = self._lignes_candidates(entries, division, store_key)
                 detail = " | ".join(
-                    f"ligne {e.source_row}: {e.id_promoter} {e.promoter} ({e.divisions_raw}, {e.working_days}j)"
-                    for e in candidates
+                    f"Reference ligne {e.source_row}: {e.id_promoter} / {e.promoter} / "
+                    f"{e.working_days} jours"
+                    for e in entries
                 )
-                self.log.check(
-                    f"{len(candidates)} promoteurs differents pour {store_label} / {division} dans la Reference "
-                    f"-> aucune modification automatique. Details : {detail}",
-                    row=first_row, store=store_label, division=division,
+                self._verifier(
+                    store_label, division, build_key(entries[0].store_code, division),
+                    f"{len(entries)} promoteurs differents pour {store_label} + {division} dans la Reference : "
+                    "aucun choix automatique, aucune ligne ecrasee, donnees laissees intactes.",
+                    rows=[t.row for t in lignes],
+                    details=detail,
                 )
-                for ref_row in candidates:
-                    self._skip_rows(build_key(ref_row.store_code, division), store_key, division)
                 continue
 
-            entry = next(iter(unique.values()))
-            self._apply_affectation(entry, division, store_label)
+            self._traiter_affectation(next(iter(distinctes.values())), division, store_label)
 
     # ------------------------------------------------------------------
-    def _apply_affectation(self, entry: ReferenceRow, division: str, store_label: str) -> None:
-        """Modifie la ligne existante, ou cree la ligne manquante, pour une cle donnee."""
+    def _traiter_affectation(self, entry: ReferenceRow, division: str, store_label: str) -> None:
+        """STEP 5 a 8 pour une combinaison Code Store + Division."""
         key = build_key(entry.store_code, division)
-        target_row = self._find_row_for_key(key, entry, division)
+        ligne = self._trouver_ligne(key)
 
-        values = self._values_from_reference(entry, division, key)
-        kam_result = self.kam.lookup(store_label or entry.store, division)
-        row_number = target_row.row if target_row else None
-
-        if kam_result.ok:
-            values["KAM"] = kam_result.kam
-            self.plan.stats.kam_found += 1
-        else:
-            self.plan.stats.kam_not_found += 1
-            level = KAM_NOT_FOUND
-            message = {
-                NOT_FOUND: "KAM introuvable dans le fichier 3",
-                WRONG_DIVISION: "KAM introuvable pour cette division",
-                AMBIGUOUS: "KAM ambigu dans le fichier 3",
-            }.get(kam_result.status, "KAM introuvable")
-            if kam_result.status == AMBIGUOUS:
-                level = CHECK
-                self.plan.stats.to_check += 1
-            self.log.log(
-                level, f"{message} ({kam_result.detail}) -> valeur KAM existante conservee",
-                row=row_number, store=store_label, division=division,
-            )
-
-        if target_row is not None:
-            self._plan_update(target_row, values, store_label, division, key)
-        else:
-            self._plan_creation(entry, division, values, store_label, key)
-
-    # ------------------------------------------------------------------
-    def _candidate_rows(self, key: str, store_key: str, division: str) -> list[TargetRow]:
-        """Toutes les lignes du fichier 2 qui correspondent a une cle, non deja utilisees."""
-        found = [self._rows_by_number[r] for r in self._key_index.get(key, []) if r not in self._consumed_rows]
-        if found:
-            return found
-        return [
-            trow for trow in self._rows_by_store.get(store_key, [])
-            if trow.row not in self._consumed_rows and norm_division(trow.get("Division1")) == division
-        ]
-
-    def _skip_rows(self, key: str, store_key: str, division: str) -> None:
-        """Marque les lignes concernees comme 'vues' (deja signalees dans le rapport).
-
-        Evite qu'une situation deja signalee (conflit, division inconnue) soit
-        re-signalee une deuxieme fois comme 'affectation absente de la Reference'.
-        """
-        for trow in self._candidate_rows(key, store_key, division):
-            self._consumed_rows.add(trow.row)
-
-    def _find_row_for_key(self, key: str, entry: ReferenceRow, division: str) -> TargetRow | None:
-        """Cherche la ligne existante correspondant a 'Code Store + Division' (regle 8)."""
-        rows = [r for r in self._key_index.get(key, []) if r not in self._consumed_rows]
-        if rows:
-            if len(rows) > 1:
-                for extra in rows[1:]:
-                    self.plan.stats.to_check += 1
-                    self.log.check(
-                        f"Plusieurs lignes portent deja la cle {key} dans le fichier 2 "
-                        "-> seule la premiere est mise a jour, les autres sont a verifier",
-                        row=extra, store=entry.store, division=division,
-                    )
-            chosen = self._rows_by_number[rows[0]]
-            self._consumed_rows.add(chosen.row)
-            return chosen
-
-        # Repli : meme magasin + meme Division1, mais Code Store / Column1 incoherents dans le fichier 2
-        for trow in self._rows_by_store.get(norm_store(entry.store), []):
-            if trow.row in self._consumed_rows:
-                continue
-            if norm_division(trow.get("Division1")) == division:
-                self.log.info(
-                    f"Ligne rapprochee par Store + Division1 (Code Store/Column1 incoherents : "
-                    f"'{trow.get('Code Store')}' / '{trow.get('Column1')}' -> cle attendue {key})",
-                    row=trow.row, store=entry.store, division=division,
-                )
-                self._consumed_rows.add(trow.row)
-                return trow
-        return None
-
-    # ------------------------------------------------------------------
-    def _values_from_reference(self, entry: ReferenceRow, division: str, key: str) -> dict[str, str]:
-        values = {
-            "ID Promoter": entry.id_promoter,
-            "Code Store": entry.store_code,
-            "Promoter": entry.promoter,
-            "Division": entry.divisions_raw,
-            "Division1": division,
-            "DAY": entry.working_days,
-            "Column1": key,
-        }
-        if self.options.update_city and entry.city:
-            values["City"] = entry.city
-        return values
-
-    # ------------------------------------------------------------------
-    def _plan_update(self, trow: TargetRow, values: dict[str, str], store_label: str, division: str, key: str) -> None:
-        # La cle existait deja : on modifie la ligne, on ne cree pas de doublon (regles 8 et 12).
-        self.plan.stats.duplicates_avoided += 1
-        self._planned_keys.add(key)
-
-        changes = [
-            CellChange(column=name, old=trow.get(name), new=new)
-            for name, new in values.items()
-            if name in self.target.layout.columns and trow.get(name) != new
-        ]
-        if not changes:
-            self.plan.stats.unchanged_rows += 1
-            return
-        self.plan.updates.append(
-            RowUpdate(row=trow.row, store=store_label, division=division, changes=changes, values=values)
-        )
-        self.plan.stats.updated_rows += 1
-        detail = "; ".join(f"{c.column}: '{c.old}' -> '{c.new}'" for c in changes)
-        self.log.log(MODIF,
-                     f"Cle {key} deja presente -> ligne existante mise a jour (duplicate evite). "
-                     f"{len(changes)} cellule(s) : {detail}",
-                     row=trow.row, store=store_label, division=division)
-
-    # ------------------------------------------------------------------
-    def _plan_creation(
-        self, entry: ReferenceRow, division: str, values: dict[str, str],
-        store_label: str, key: str, origin: str = "",
-    ) -> None:
-        if key in self._planned_keys:
-            self.plan.stats.duplicates_avoided += 1
-            self.log.log(DUPLICATE, f"Cle {key} deja traitee -> creation annulee",
+        # Regles 8 et 15 : un vrai duplicate evite = une CREATION annulee parce que
+        # la combinaison Code Store + Division a deja ete traitee dans ce passage.
+        if ligne is None and key in self._keys_traitees:
+            self.plan.stats.duplicates_evites += 1
+            self.log.log(DUPLICATE, f"Cle {key} deja traitee dans ce passage -> creation annulee",
                          store=store_label, division=division)
             return
 
-        sibling = self._sibling_row(entry)
-        full = dict(values)
-        full["Store"] = (sibling.get("Store") if sibling else "") or entry.store or store_label
+        # STEP 7 : KAM cherche avec Store + Division (regle 11)
+        kam_result = self.kam.lookup(store_label or entry.store, division)
+        if kam_result.ok:
+            kam_value = kam_result.kam
+            self.plan.stats.kam_trouves += 1
+            kam_reason = f"KAM '{kam_value}' trouve dans la feuille {division} du fichier 3."
+        else:
+            kam_value = ""                                  # regle 11 : ne rien inventer, laisser vide
+            self.plan.stats.kam_non_trouves += 1
+            motif = {
+                NOT_FOUND: "Store absent du fichier 3",
+                WRONG_DIVISION: f"Store absent de la feuille {division} du fichier 3",
+                AMBIGUOUS: "plusieurs KAM differents pour ce Store dans le fichier 3",
+            }.get(kam_result.status, "KAM introuvable")
+            kam_reason = f"KAM non trouve ({motif}) : colonne KAM laissee vide."
+            self.log.log(KAM_NON_TROUVE, f"{motif} -> KAM laisse vide",
+                         row=ligne.row if ligne else None, store=store_label, division=division)
 
-        # Colonnes que la Reference ne fournit pas : on recopie la ligne soeur du meme magasin.
-        for name, fallback in (("Annee", None), ("Mois", None), ("STATUT", None)):
-            if name not in self.target.layout.columns:
-                continue
-            value = sibling.get(name) if sibling else ""
-            if not value:
-                value = self._dominant.get(name, "")
-                if value:
-                    self.log.check(
-                        f"Nouvelle ligne {key} : '{name}' non fourni par la Reference "
-                        f"-> valeur la plus frequente du fichier 2 utilisee ('{value}') - a verifier",
-                        store=store_label, division=division,
-                    )
-                    self.plan.stats.to_check += 1
-            full[name] = value
+        valeurs = self._valeurs_reference(entry, division, key, kam_value)
 
-        if "City" in self.target.layout.columns and not full.get("City"):
-            full["City"] = (sibling.get("City") if sibling else "") or entry.city
+        if ligne is not None:
+            self._planifier_update(ligne, valeurs, entry, division, store_label, key, kam_reason)
+        else:
+            self._planifier_creation(entry, division, store_label, key, valeurs, kam_reason)
+        self._keys_traitees.add(key)
 
-        if "IDAYA" in self.target.layout.columns:
-            if self.options.auto_number_idaya:
-                full["IDAYA"] = str(self._next_idaya)
-                self._next_idaya += 1
-            else:
-                full["IDAYA"] = ""
-                self.plan.stats.to_check += 1
-                self.log.check(
-                    f"Nouvelle ligne {key} : colonne IDAYA laissee vide (aucune regle definie) - a completer",
-                    store=store_label, division=division,
-                )
-
-        self.plan.creations.append(
-            RowCreation(
-                store=full["Store"], division=division, values=full,
-                template_row=sibling.row if sibling else None, origin=origin,
+    # ------------------------------------------------------------------
+    def _trouver_ligne(self, key: str) -> TargetRow | None:
+        """STEP 5 : la combinaison Code Store + Division existe-t-elle deja ? (regles 8, 9, 10)"""
+        candidates = self._candidates_for_key(key)
+        if not candidates:
+            return None
+        choisie = candidates[0]
+        self._used_rows.add(choisie.row)
+        for autre in candidates[1:]:
+            self._verifier(
+                autre.get("Store"), norm_division(autre.get("Division1")), key,
+                f"La cle {key} apparait sur plusieurs lignes du fichier 2 : "
+                f"seule la ligne {choisie.row} est mise a jour, celle-ci est laissee intacte.",
+                rows=[autre.row],
             )
+            self._used_rows.add(autre.row)
+        return choisie
+
+    # ------------------------------------------------------------------
+    def _valeurs_reference(self, entry: ReferenceRow, division: str, key: str, kam: str) -> dict[str, str]:
+        """Regles 4, 5 et 12 : ce que la Reference impose dans le fichier 2."""
+        return {
+            "Division": entry.divisions_raw,     # valeur brute de la Reference (VD, DA ou VD+DA)
+            "Division1": division,               # division reellement traitee
+            "KAM": kam,
+            "ID Promoter": entry.id_promoter,
+            "Code Store": entry.store_code,
+            "Promoter": entry.promoter,
+            "Store": entry.store,
+            "City": entry.city,
+            "DAY": entry.working_days,
+            "Column1": key,                      # Code Store + Division1
+        }
+
+    # ------------------------------------------------------------------
+    def _planifier_update(self, trow: TargetRow, valeurs: dict[str, str], entry: ReferenceRow,
+                          division: str, store_label: str, key: str, kam_reason: str) -> None:
+        changes = [
+            CellChange(column=name, old=trow.get(name), new=valeur)
+            for name, valeur in valeurs.items()
+            if name in self.target.layout.columns and trow.get(name) != valeur
+        ]
+        source = f"Reference ligne {entry.source_row} (Divisions={entry.divisions_raw})"
+        if not changes:
+            self.plan.stats.lignes_conformes += 1
+            self._decide(
+                CONFORME, trow.row, store=store_label, division=division, key=key,
+                reason=f"Cle {key} presente dans le fichier 2 et deja identique a la Reference : "
+                       "aucune cellule modifiee.",
+                details=f"{source}. {kam_reason}",
+            )
+            return
+        self.plan.updates.append(
+            RowUpdate(row=trow.row, store=store_label, division=division, key=key, changes=changes)
         )
-        self._planned_keys.add(key)
-        self.plan.stats.created_rows += 1
-        self.log.log(
-            CREATE,
-            f"Nouvelle ligne creee pour la cle {key} "
-            f"({full.get('ID Promoter', '')} - {full.get('Promoter', '')}, {full.get('DAY', '')} jours)"
-            + (f" [{origin}]" if origin else ""),
-            row=sibling.row if sibling else None, store=full["Store"], division=division,
+        self.plan.stats.lignes_modifiees += 1
+        self._decide(
+            MODIFIEE, trow.row, store=store_label, division=division, key=key,
+            reason=f"Cle {key} deja presente dans le fichier 2 : la ligne existante est mise a jour "
+                   f"({len(changes)} cellule(s)), aucune ligne creee.",
+            details=f"{source}. {kam_reason} Cellules : " + " ; ".join(c.as_text() for c in changes),
         )
 
     # ------------------------------------------------------------------
-    def _sibling_row(self, entry: ReferenceRow) -> TargetRow | None:
-        """Ligne deja presente pour le meme magasin (sert de modele de style et de valeurs)."""
+    def _planifier_creation(self, entry: ReferenceRow, division: str, store_label: str,
+                            key: str, valeurs: dict[str, str], kam_reason: str) -> None:
+        soeur = self._ligne_soeur(entry)
+        complet = dict(valeurs)
+        notes = []
+
+        # Colonnes que la Reference ne fournit pas : recopiees depuis la ligne
+        # du MEME Code Store (autre division) si elle existe, sinon laissees vides.
+        for name in ("Annee", "Mois", "STATUT"):
+            if name not in self.target.layout.columns:
+                continue
+            valeur = soeur.get(name) if soeur else ""
+            complet[name] = valeur
+            if not valeur:
+                notes.append(f"{name} laisse vide (absent de la Reference et aucune ligne du meme Code Store)")
+
+        if "IDAYA" in self.target.layout.columns:
+            if self.options.auto_number_idaya:
+                complet["IDAYA"] = str(self._next_idaya)
+                notes.append(f"IDAYA={self._next_idaya} (numerotation automatique des lignes creees)")
+                self._next_idaya += 1
+            else:
+                complet["IDAYA"] = ""
+                notes.append("IDAYA laisse vide (option de numerotation desactivee)")
+
+        self.plan.creations.append(
+            RowCreation(store=complet.get("Store", store_label), division=division,
+                        key=key, values=complet, template_row=soeur.row if soeur else None)
+        )
+        self.plan.stats.lignes_ajoutees += 1
+        if notes:
+            self._verifier(
+                complet.get("Store", store_label), division, key,
+                "Ligne creee avec des colonnes non fournies par la Reference : " + " ; ".join(notes),
+            )
+        origine = (f"Annee/Mois/STATUT recopies depuis la ligne {soeur.row} (meme Code Store)"
+                   if soeur else "aucune ligne du meme Code Store pour recopier Annee/Mois/STATUT")
+        self._decide(
+            CREEE, None, store=complet.get("Store", store_label), division=division, key=key,
+            reason=f"Cle {key} absente du fichier 2 alors que la Reference (ligne {entry.source_row}, "
+                   f"Divisions={entry.divisions_raw}) l'exige : nouvelle ligne creee.",
+            details=f"{kam_reason} {origine}. Valeurs : ID Promoter={complet.get('ID Promoter')}, "
+                    f"Promoter={complet.get('Promoter')}, DAY={complet.get('DAY')}, "
+                    f"City={complet.get('City')}.",
+        )
+
+    # ------------------------------------------------------------------
+    def _ligne_soeur(self, entry: ReferenceRow) -> TargetRow | None:
+        """Ligne du fichier 2 portant le MEME Code Store (autre division).
+
+        Elle sert uniquement a recopier Annee / Mois / STATUT (que la Reference
+        ne contient pas) et a reprendre la mise en forme. Rien d'autre.
+        """
+        code = build_key(entry.store_code, "")
+        for trow in self.target.rows:
+            if code and build_key(trow.get("Code Store"), "") == code:
+                return trow
         rows = self._rows_by_store.get(norm_store(entry.store), [])
         return rows[0] if rows else None
 
     # ------------------------------------------------------------------
-    def _process_missing_reference_stores(self) -> None:
-        """Option : cree les affectations de la Reference dont le magasin est totalement absent."""
-        for store_key, entries in self.reference.by_store.items():
-            if not store_key or store_key in self._rows_by_store:
-                continue
-            for entry in entries:
-                for division in entry.divisions:
-                    if division not in KNOWN_DIVISIONS and not self.options.process_unknown_divisions:
-                        continue
-                    key = build_key(entry.store_code, division)
-                    values = self._values_from_reference(entry, division, key)
-                    kam_result = self.kam.lookup(entry.store, division)
-                    if kam_result.ok:
-                        values["KAM"] = kam_result.kam
-                        self.plan.stats.kam_found += 1
-                    else:
-                        self.plan.stats.kam_not_found += 1
-                        self.log.log(KAM_NOT_FOUND,
-                                     f"KAM introuvable ({kam_result.detail})",
-                                     store=entry.store, division=division)
-                    self._plan_creation(entry, division, values, entry.store, key,
-                                        origin="option: store present dans la Reference, absent du fichier 2")
+    def _lignes_candidates(self, entries: list[ReferenceRow], division: str, store_key: str) -> list[TargetRow]:
+        """Lignes du fichier 2 concernees par une division non traitee (RAC, conflit)."""
+        trouvees: list[TargetRow] = []
+        for entry in entries:
+            for trow in self._candidates_for_key(build_key(entry.store_code, division)):
+                if trow not in trouvees:
+                    trouvees.append(trow)
+        if not trouvees:
+            for trow in self._rows_by_store.get(store_key, []):
+                if trow.row not in self._used_rows and norm_division(trow.get("Division1")) == division:
+                    trouvees.append(trow)
+        for trow in trouvees:
+            self._used_rows.add(trow.row)
+        return trouvees
 
     # ------------------------------------------------------------------
-    def _report_orphan_rows(self) -> None:
-        """Signale les lignes du fichier 2 qui ne correspondent a aucune affectation de la Reference."""
+    def _decider_lignes_restantes(self) -> None:
+        """Lignes du fichier 2 sans decision : aucune affectation correspondante."""
         for trow in self.target.rows:
-            if trow.row in self._consumed_rows:
+            if trow.row in self._decided_rows:
                 continue
-            self.plan.stats.to_check += 1
-            self.log.check(
-                f"Affectation '{trow.get('Store')} / {trow.get('Division1')}' absente de la Reference "
-                "-> ligne conservee telle quelle",
-                row=trow.row, store=trow.get("Store"), division=trow.get("Division1"),
+            self._decide(
+                IGNOREE, trow.row, store=trow.get("Store"), division=trow.get("Division1"),
+                key=build_key(trow.get("Code Store"), trow.get("Division1")),
+                reason="Aucune affectation correspondante dans la Reference pour ce Code Store + Division : "
+                       "ligne laissee intacte (aucune suppression, aucune modification).",
             )
+
+    # ------------------------------------------------------------------
+    # Helpers de journalisation
+    # ------------------------------------------------------------------
+    def _decide(self, decision: str, row: int | None, reason: str, store: str = "",
+                division: str = "", key: str = "", details: str = "") -> None:
+        if row is not None:
+            if row in self._decided_rows:
+                return
+            self._decided_rows.add(row)
+        self.log.decide(decision, reason, row=row, store=store,
+                        division=norm_division(division) if division else "", key=key, details=details)
+
+    def _verifier(self, store: str, division: str, key: str, reason: str,
+                  rows: list[int] | None = None, details: str = "") -> None:
+        """Enregistre un cas 'A VERIFIER' (le logiciel ne decide pas a la place de l'utilisateur)."""
+        self.plan.stats.a_verifier += 1
+        if rows:
+            for row in rows:
+                self._decide(A_VERIFIER, row, reason=reason, store=store, division=division,
+                             key=key, details=details)
+        else:
+            self.log.decide(A_VERIFIER, reason, row=None, store=store,
+                            division=division, key=key, details=details)

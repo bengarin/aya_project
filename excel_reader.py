@@ -46,60 +46,84 @@ class SheetSpec:
     required: tuple[str, ...]
     optional: tuple[str, ...] = ()
     aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Feuille(s) attendue(s) d'apres les regles (utilisees pour departager).
+    preferred_titles: tuple[str, ...] = ()
+    # Repli : position exacte des colonnes imposee par les regles, si les
+    # en-tetes ne sont pas reconnus par leur nom (1 = colonne A).
+    positional: dict[str, int] = field(default_factory=dict)
+    positional_header_row: int = 1
 
     @property
     def all_columns(self) -> tuple[str, ...]:
         return self.required + self.optional
 
 
+# Fichier 1 - Reference : feuille Feuil2, en-tetes ligne 1
+#   C = Divisions | F = ID Promoter | G = Store Code | H = PROMOTER
+#   I = STORE     | J = CITY        | L = Working Days
 REFERENCE_SPEC = SheetSpec(
     label="Fichier 1 - Reference",
-    required=("ID Promoter", "Store Code", "PROMOTER", "STORE", "Divisions", "Working Days"),
-    optional=("CITY", "GRADE", "Family", "Sub-channel"),
+    required=("Divisions", "ID Promoter", "Store Code", "PROMOTER", "STORE", "CITY", "Working Days"),
+    optional=(),
     aliases={
         "ID Promoter": ("id promoteur", "idpromoter", "id promo"),
         "Store Code": ("code store", "code magasin", "storecode"),
         "PROMOTER": ("promoteur", "nom promoteur"),
         "STORE": ("magasin", "store name", "nom store"),
-        "Divisions": ("division", "divisions1"),
+        "Divisions": ("division",),
         "Working Days": ("working day", "day", "days", "jours", "nb jours"),
-        "CITY": ("ville",),
+        "CITY": ("ville", "city"),
     },
+    preferred_titles=("Feuil2",),
+    positional={"Divisions": 3, "ID Promoter": 6, "Store Code": 7, "PROMOTER": 8,
+                "STORE": 9, "CITY": 10, "Working Days": 12},
+    positional_header_row=1,
 )
 
+# Fichier 2 - BDD a traiter : feuille BDD PROMOTERS MONTH, en-tetes ligne 1
+#   A = Annee | B = Mois | C = Division | D = Division1 | E = KAM | F = ID Promoter
+#   G = Code Store | H = Promoter | I = Store | J = City | K = STATUT | L = DAY
+#   M = IDAYA | N = Column1
 TARGET_SPEC = SheetSpec(
     label="Fichier 2 - BDD a traiter",
-    required=(
-        "ID Promoter", "Code Store", "Promoter", "Store",
-        "Division1", "KAM", "DAY", "Column1",
-    ),
-    optional=("Annee", "Mois", "Division", "City", "STATUT", "IDAYA"),
+    required=("Division", "Division1", "KAM", "ID Promoter", "Code Store",
+              "Promoter", "Store", "City", "DAY", "Column1"),
+    optional=("Annee", "Mois", "STATUT", "IDAYA"),
     aliases={
         "ID Promoter": ("id promoteur", "idpromoter"),
         "Code Store": ("store code", "code magasin"),
         "Promoter": ("promoteur",),
         "Store": ("magasin", "store name"),
-        "Division1": ("division 1", "division1", "sous division"),
+        "Division1": ("division 1", "sous division"),
         "DAY": ("days", "working days", "jours"),
-        "Column1": ("colonne1", "column 1", "colonne 1", "cle", "key", "id"),
+        "Column1": ("colonne1", "column 1", "colonne 1", "cle", "key"),
         "Annee": ("annee", "année", "year"),
         "Mois": ("month",),
         "City": ("ville",),
-        "STATUT": ("statut", "status"),
-        "IDAYA": ("id aya", "idaya"),
+        "STATUT": ("status",),
+        "IDAYA": ("id aya",),
     },
+    preferred_titles=("BDD PROMOTERS MONTH",),
+    positional={"Annee": 1, "Mois": 2, "Division": 3, "Division1": 4, "KAM": 5,
+                "ID Promoter": 6, "Code Store": 7, "Promoter": 8, "Store": 9,
+                "City": 10, "STATUT": 11, "DAY": 12, "IDAYA": 13, "Column1": 14},
+    positional_header_row=1,
 )
 
+# Fichier 3 - Affectation KAM : une feuille VD et une feuille DA
 KAM_SPEC = SheetSpec(
     label="Fichier 3 - Affectation KAM",
     required=("Store", "KAM"),
     optional=("CITY", "Code store"),
     aliases={
         "Store": ("magasin", "store name", "nom store"),
-        "KAM": ("kam", "responsable"),
+        "KAM": ("responsable",),
         "CITY": ("city", "ville"),
         "Code store": ("store code", "code magasin"),
     },
+    preferred_titles=("VD", "DA"),
+    positional={"CITY": 2, "Code store": 3, "Store": 4, "KAM": 5},
+    positional_header_row=2,
 )
 
 
@@ -118,6 +142,7 @@ class SheetLayout:
     visible: bool = True
     table_name: str | None = None
     header_labels: dict[int, str] = field(default_factory=dict)
+    positional: bool = False          # True = colonnes prises par position (repli)
 
     @property
     def is_valid(self) -> bool:
@@ -132,7 +157,9 @@ class SheetLayout:
 
     def describe(self) -> str:
         found = ", ".join(f"{k}=col.{_letter(v)}" for k, v in sorted(self.columns.items(), key=lambda x: x[1]))
-        return f"Feuille '{self.title}' | en-tetes ligne {self.header_row} | {self.data_rows} lignes | {found}"
+        mode = " | colonnes prises par POSITION (en-tetes non reconnus)" if self.positional else ""
+        return (f"Feuille '{self.title}' | en-tetes ligne {self.header_row} | "
+                f"{self.data_rows} lignes | {found}{mode}")
 
 
 def _letter(index: int) -> str:
@@ -249,10 +276,34 @@ def analyze_sheet(ws, spec: SheetSpec) -> SheetLayout:
 
 
 def analyze_workbook(wb, spec: SheetSpec) -> list[SheetLayout]:
-    """Analyse toutes les feuilles et classe les meilleures candidates en premier."""
+    """Analyse toutes les feuilles et classe les meilleures candidates en premier.
+
+    Priorite : feuille complete > feuille attendue par les regles (Feuil2,
+    BDD PROMOTERS MONTH...) > feuille visible > feuille avec le plus de lignes.
+    """
+    preferred = {title.casefold() for title in spec.preferred_titles}
     layouts = [analyze_sheet(ws, spec) for ws in wb.worksheets]
-    layouts.sort(key=lambda l: (not l.is_valid, not l.visible, -l.data_rows, l.title))
+    layouts.sort(key=lambda l: (not l.is_valid, l.title.casefold() not in preferred,
+                                not l.visible, -l.data_rows, l.title))
     return layouts
+
+
+def build_positional_layout(ws, spec: SheetSpec) -> SheetLayout | None:
+    """Repli : applique la position EXACTE des colonnes imposee par les regles.
+
+    Utilise uniquement si aucune feuille n'a d'en-tetes reconnaissables.
+    """
+    if not spec.positional:
+        return None
+    header_row = spec.positional_header_row
+    columns = dict(spec.positional)
+    last = _find_last_data_row(ws, columns, header_row, min(ws.max_row or header_row, header_row + 200_000))
+    return SheetLayout(
+        title=ws.title, header_row=header_row, columns=columns, missing=[],
+        last_data_row=last, visible=(getattr(ws, "sheet_state", "visible") == "visible"),
+        header_labels={idx: cell_to_text(ws.cell(header_row, idx).value) for idx in columns.values()},
+        positional=True,
+    )
 
 
 def pick_layout(layouts: list[SheetLayout], spec: SheetSpec, wanted: str | None = None) -> SheetLayout:
@@ -275,6 +326,21 @@ def pick_layout(layouts: list[SheetLayout], spec: SheetSpec, wanted: str | None 
         f"{spec.label} : aucune feuille ne contient les colonnes obligatoires.\n"
         f"Colonnes manquantes (meilleure feuille testee) : " + ", ".join(detail)
     )
+
+
+def pick_layout_or_positional(wb, layouts: list[SheetLayout], spec: SheetSpec,
+                              wanted: str | None = None) -> SheetLayout:
+    """Comme pick_layout, mais avec le repli 'colonnes par position' des regles."""
+    try:
+        return pick_layout(layouts, spec, wanted)
+    except ExcelReadError:
+        titles = [wanted] if wanted else list(spec.preferred_titles) + wb.sheetnames
+        for title in titles:
+            if title and title in wb.sheetnames:
+                layout = build_positional_layout(wb[title], spec)
+                if layout is not None and layout.data_rows > 0:
+                    return layout
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +378,7 @@ def load_reference(path: str | Path, sheet: str | None = None) -> ReferenceData:
     try:
         sheet_names = wb.sheetnames
         layouts = analyze_workbook(wb, REFERENCE_SPEC)
-        layout = pick_layout(layouts, REFERENCE_SPEC, sheet)
+        layout = pick_layout_or_positional(wb, layouts, REFERENCE_SPEC, sheet)
         ws = wb[layout.title]
         rows: list[ReferenceRow] = []
         by_store: dict[str, list[ReferenceRow]] = {}
@@ -379,6 +445,14 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
         sheet_names = wb.sheetnames
         layouts_all = [analyze_sheet(wb[name], KAM_SPEC) for name in sheet_names]
         usable = [l for l in layouts_all if l.is_valid and (sheets is None or l.title in sheets)]
+        if not usable:
+            # Repli : positions exactes (B=CITY, C=Code store, D=Store, E=KAM)
+            for name in sheet_names:
+                if sheets is not None and name not in sheets:
+                    continue
+                layout = build_positional_layout(wb[name], KAM_SPEC)
+                if layout is not None and layout.data_rows > 0:
+                    usable.append(layout)
         if not usable:
             missing = layouts_all[0].missing if layouts_all else KAM_SPEC.required
             raise ExcelReadError(
@@ -455,7 +529,7 @@ def load_target(path: str | Path, sheet: str | None = None) -> TargetData:
     warnings: list[str] = []
     try:
         layouts = analyze_workbook(wb, TARGET_SPEC)
-        layout = pick_layout(layouts, TARGET_SPEC, sheet)
+        layout = pick_layout_or_positional(wb, layouts, TARGET_SPEC, sheet)
         ws = wb[layout.title]
 
         cached: dict[tuple[int, int], object] = {}

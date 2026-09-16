@@ -21,11 +21,11 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 
 from excel_reader import TargetData
-from logger import ERROR, INFO, ProcessLogger
+from logger import ERREUR, INFO, ProcessLogger
 from processor import Plan
 
+# Rouge : seule couleur prevue par les regles (ligne dont le Store est vide).
 RED_FILL = PatternFill("solid", start_color="FFFF0000", end_color="FFFF0000")
-ORANGE_FILL = PatternFill("solid", start_color="FFFFC000", end_color="FFFFC000")
 
 _INT_RE = re.compile(r"^-?\d+$")
 _FLOAT_RE = re.compile(r"^-?\d+[.,]\d+$")
@@ -132,12 +132,11 @@ def apply_plan(
             result.updated_cells += 1
 
     # ------------------------------------------------------------------
-    # 2. Lignes a colorer (Store vide -> rouge ; option -> orange)
+    # 2. Lignes a colorer en rouge (Store vide, regle 2)
     # ------------------------------------------------------------------
     for mark in plan.marks:
-        fill = RED_FILL if mark.kind == "red" else ORANGE_FILL
         for col in range(first_col, last_col + 1):
-            ws.cell(mark.row, col).fill = fill
+            ws.cell(mark.row, col).fill = RED_FILL
         result.colored_rows += 1
 
     # ------------------------------------------------------------------
@@ -185,7 +184,7 @@ def apply_plan(
             f"Impossible d'ecrire {output_path.name} : le fichier est peut-etre ouvert dans Excel.\n({exc})"
         ) from exc
     except Exception as exc:                                # pragma: no cover - cas rare
-        log.log(ERROR, f"Echec de l'enregistrement : {exc}")
+        log.log(ERREUR, f"Echec de l'enregistrement : {exc}")
         raise ExcelWriteError(f"Echec de l'enregistrement : {exc}") from exc
 
     return result

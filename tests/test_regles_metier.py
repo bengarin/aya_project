@@ -1,11 +1,9 @@
 """
 tests/test_regles_metier.py
 ---------------------------
-Verifie que le logiciel respecte les regles metier, une regle = un test.
+Un test par regle, et les 10 cas obligatoires demandes.
 
-Lancement :
     python -m unittest discover -s tests -v
-    (ou simplement : python tests/test_regles_metier.py)
 """
 
 from __future__ import annotations
@@ -21,187 +19,289 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import openpyxl                                              # noqa: E402
+import openpyxl                                                    # noqa: E402
 
-from make_fixtures import build_all                          # noqa: E402
-from matcher import build_key, norm_store, split_divisions   # noqa: E402
-from pipeline import PipelineError, Selection, Session       # noqa: E402
-from processor import Options                                # noqa: E402
+from logger import (                                               # noqa: E402
+    A_VERIFIER, CONFORME, CREEE, IGNOREE, MODIFIEE, ROUGE, STORE_NON_TROUVE,
+)
+from make_fixtures import build_all                                # noqa: E402
+from matcher import build_key, norm_store, split_divisions         # noqa: E402
+from pipeline import PipelineError, Selection, Session             # noqa: E402
+from processor import Options                                      # noqa: E402
 
 SHEET = "BDD PROMOTERS MONTH"
 COL = {name: index for index, name in enumerate(
     ["Annee", "Mois", "Division", "Division1", "KAM", "ID Promoter", "Code Store",
      "Promoter", "Store", "City", "STATUT", "DAY", "IDAYA", "Column1"], start=1)}
 
+# Lignes du fichier 2 de test (voir tests/make_fixtures.py)
+L_VD_EXISTANT = 2
+L_DA_EXISTANT = 3
+L_VDDA_VD = 4
+L_STORE_VIDE = 5
+L_STORE_INCONNU = 6
+L_RAC = 7
+L_CONFLIT = 8
+L_COLUMN1_FAUX = 9
+L_SANS_REFERENCE = 10
+L_SANS_KAM = 11
+L_ALIAS_A = 12
+L_ALIAS_B = 13
+L_CREEE = 14
+
 
 def md5(path: Path) -> str:
     return hashlib.md5(Path(path).read_bytes()).hexdigest()
 
 
-def cell(ws, row: int, column: str):
-    return ws.cell(row, COL[column]).value
-
-
 class BaseCase(unittest.TestCase):
-    """Prepare 3 fichiers de test neufs pour chaque test (isolation totale)."""
-
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="aya_test_"))
         self.files = build_all(self.folder)
         self.output = self.folder / "RESULTAT.xlsx"
         self.hashes = {name: md5(path) for name, path in self.files.items()}
+        self.plan = None
 
     def tearDown(self) -> None:
         shutil.rmtree(self.folder, ignore_errors=True)
 
-    def run_pipeline(self, options: Options | None = None, output: Path | None = None):
+    # -- helpers -------------------------------------------------------
+    def run_pipeline(self, options: Options | None = None, output: Path | None = None,
+                     target: Path | None = None):
         session = Session(
-            Selection(reference=self.files["reference"], target=self.files["target"], kam=self.files["kam"]),
+            Selection(reference=self.files["reference"], target=target or self.files["target"],
+                      kam=self.files["kam"]),
             options or Options(),
         )
         try:
             session.load()
             plan = session.analyze()
-            result, _reports = session.apply(output or self.output, write_report=False)
+            result, _ = session.apply(output or self.output, write_report=False)
+            self.plan = plan
             return plan, result
         finally:
             session.close()
 
-    def result_sheet(self, path: Path | None = None):
-        wb = openpyxl.load_workbook(path or self.output)
-        return wb, wb[SHEET]
+    def sheet(self, path: Path | None = None):
+        self.wb = openpyxl.load_workbook(path or self.output)
+        return self.wb[SHEET]
+
+    def cell(self, ws, row: int, column: str):
+        return ws.cell(row, COL[column]).value
+
+    def decision_of(self, plan, row: int) -> str:
+        found = [d.decision for d in plan.logger.decisions if d.row == row]
+        self.assertEqual(len(found), 1, f"la ligne {row} doit avoir exactement 1 decision, trouve {found}")
+        return found[0]
+
+    def reason_of(self, plan, row: int) -> str:
+        return next(d.reason + " " + d.details for d in plan.logger.decisions if d.row == row)
 
 
-class TestDetection(BaseCase):
-    def test_feuilles_et_colonnes_detectees(self):
+class TestCasObligatoires(BaseCase):
+    """Les 10 cas exiges avant de considerer le projet termine."""
+
+    def test_01_store_vide(self):
+        plan, result = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_STORE_VIDE), ROUGE)
+        self.assertEqual(plan.stats.lignes_store_vide, 1)
+        self.assertEqual(result.colored_rows, 1)
+        for column in COL:
+            self.assertEqual(ws.cell(L_STORE_VIDE, COL[column]).fill.start_color.rgb, "FFFF0000",
+                             f"colonne {column} non coloree")
+        # aucune valeur touchee
+        self.assertEqual(self.cell(ws, L_STORE_VIDE, "ID Promoter"), "ID_ORPHELIN")
+        self.assertEqual(self.cell(ws, L_STORE_VIDE, "Promoter"), "PROMO ORPHELIN")
+        self.assertEqual(self.cell(ws, L_STORE_VIDE, "KAM"), "KAM X")
+        self.assertIsNone(self.cell(ws, L_STORE_VIDE, "Store"))
+
+    def test_02_store_non_trouve(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_STORE_INCONNU), STORE_NON_TROUVE)
+        self.assertEqual(plan.stats.stores_non_trouves, 1)
+        self.assertEqual(self.cell(ws, L_STORE_INCONNU, "ID Promoter"), "ID_INCONNU")
+        self.assertEqual(self.cell(ws, L_STORE_INCONNU, "KAM"), "KAM Y")
+
+    def test_03_store_vd_existant(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_VD_EXISTANT), MODIFIEE)
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "ID Promoter"), "IDVD123")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Promoter"), "PROMO VD KENITRA")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "DAY"), 26)
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "City"), "Kenitra")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Division"), "VD")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Division1"), "VD")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Column1"), "C123VD")
+
+    def test_04_store_da_existant(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_DA_EXISTANT), CONFORME)
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "Promoter"), "PROMO DA KENITRA")
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "DAY"), 24)
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "Column1"), "C123DA")
+
+    def test_05_vd_existant_da_absent(self):
+        plan, result = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(plan.stats.lignes_ajoutees, 1)
+        self.assertEqual(result.created_rows, 1)
+        self.assertEqual(ws.max_row, L_CREEE)
+        self.assertEqual(self.cell(ws, L_CREEE, "Column1"), "C200DA")
+        self.assertEqual(self.cell(ws, L_CREEE, "Division1"), "DA")
+        self.assertEqual(self.cell(ws, L_CREEE, "ID Promoter"), "IDVDDA200")
+        self.assertEqual(self.cell(ws, L_CREEE, "DAY"), 26)
+        self.assertEqual(self.cell(ws, L_CREEE, "City"), "Casablanca")
+        # la ligne VD existante a ete mise a jour, pas dupliquee
+        self.assertEqual(self.decision_of(plan, L_VDDA_VD), MODIFIEE)
+
+    def test_06_store_vd_plus_da(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        cles = [self.cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
+        self.assertEqual(cles.count("C200VD"), 1)
+        self.assertEqual(cles.count("C200DA"), 1)
+        creees = [d.key for d in plan.logger.by_decision(CREEE)]
+        self.assertEqual(creees, ["C200DA"])
+
+    def test_07_meme_store_meme_division_deux_promoteurs(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_CONFLIT), A_VERIFIER)
+        self.assertIn("2 promoteurs differents", self.reason_of(plan, L_CONFLIT))
+        # donnees intactes : aucun des deux promoteurs n'a ete choisi
+        self.assertEqual(self.cell(ws, L_CONFLIT, "ID Promoter"), "ANCIEN_CONF")
+        self.assertEqual(self.cell(ws, L_CONFLIT, "Promoter"), "ANCIEN PROMO CONF")
+        self.assertEqual(self.cell(ws, L_CONFLIT, "KAM"), "KAM W")
+
+    def test_08_kam_different_entre_vd_et_da(self):
+        _, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "KAM"), "KAM VD KENITRA")
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "KAM"), "KAM DA KENITRA")
+        self.assertEqual(self.cell(ws, L_VDDA_VD, "KAM"), "KAM VD VDDA")
+        self.assertEqual(self.cell(ws, L_CREEE, "KAM"), "KAM DA VDDA")
+
+    def test_09_column1_incorrect_corrige(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_COLUMN1_FAUX), MODIFIEE)
+        self.assertEqual(self.cell(ws, L_COLUMN1_FAUX, "Column1"), "C300VD")
+        self.assertEqual(self.cell(ws, L_COLUMN1_FAUX, "Code Store"), "C300")
+        # aucune ligne creee a cause de la cle fausse
+        self.assertEqual(plan.stats.lignes_ajoutees, 1)
+
+    def test_10_deuxieme_execution_sans_duplicate(self):
+        premier, _ = self.run_pipeline()
+        lignes_apres_1 = self.sheet().max_row
+        second_output = self.folder / "RESULTAT2.xlsx"
+        plan, _ = self.run_pipeline(target=self.output, output=second_output)
+        ws = self.sheet(second_output)
+        self.assertEqual(plan.stats.lignes_modifiees, 0)
+        self.assertEqual(plan.stats.lignes_ajoutees, 0)
+        self.assertEqual(ws.max_row, lignes_apres_1)
+        cles = [self.cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
+        self.assertEqual(len(cles), len(set(cles)) + 1)   # seul le doublon deja present reste
+        self.assertEqual(premier.stats.lignes_analysees + 1, plan.stats.lignes_analysees)
+
+
+class TestAutresRegles(BaseCase):
+    def test_rac_jamais_traite_comme_vd_ou_da(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_RAC), A_VERIFIER)
+        self.assertIn("RAC", self.reason_of(plan, L_RAC))
+        self.assertEqual(self.cell(ws, L_RAC, "Division1"), "RAC")
+        self.assertEqual(self.cell(ws, L_RAC, "ID Promoter"), "IDRAC400")
+        self.assertEqual(self.cell(ws, L_RAC, "KAM"), "KAM Z")
+
+    def test_kam_non_trouve_laisse_vide(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(plan.stats.kam_non_trouves, 1)
+        self.assertIsNone(self.cell(ws, L_SANS_KAM, "KAM"))
+
+    def test_ligne_sans_correspondance_ignoree(self):
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        self.assertEqual(self.decision_of(plan, L_SANS_REFERENCE), IGNOREE)
+        self.assertEqual(self.cell(ws, L_SANS_REFERENCE, "KAM"), "KAM ??")
+
+    def test_duplicate_compte_uniquement_les_creations_annulees(self):
+        plan, _ = self.run_pipeline()
+        self.assertEqual(plan.stats.duplicates_evites, 1)
+        self.assertLess(plan.stats.duplicates_evites, plan.stats.lignes_analysees)
+        self.assertEqual(self.decision_of(plan, L_ALIAS_A), MODIFIEE)
+        self.assertEqual(self.decision_of(plan, L_ALIAS_B), A_VERIFIER)
+
+    def test_colonnes_jamais_touchees(self):
+        _, _ = self.run_pipeline()
+        ws = self.sheet()
+        for row, idaya in ((L_VD_EXISTANT, 1), (L_VDDA_VD, 3), (L_COLUMN1_FAUX, 8)):
+            self.assertEqual(self.cell(ws, row, "Annee"), 2026)
+            self.assertEqual(self.cell(ws, row, "Mois"), "Juillet")
+            self.assertEqual(self.cell(ws, row, "STATUT"), "Actif")
+            self.assertEqual(self.cell(ws, row, "IDAYA"), idaya)
+
+    def test_statistiques_exactes(self):
+        plan, _ = self.run_pipeline()
+        attendu = {
+            "Lignes analysees": 12, "Lignes modifiees": 5, "Lignes deja conformes": 1,
+            "Lignes ajoutees": 1, "Lignes Store vide": 1, "Stores non trouves": 1,
+            "KAM trouves": 6, "KAM non trouves": 1, "Duplicates evites": 1, "A verifier": 4,
+        }
+        self.assertEqual(dict(plan.stats.as_pairs()), attendu)
+
+    def test_rapport_explique_chaque_ligne(self):
+        plan, _ = self.run_pipeline()
+        lignes = {d.row for d in plan.logger.decisions if d.row}
+        self.assertEqual(lignes, set(range(2, 14)))          # les 12 lignes du fichier 2
+        for decision in plan.logger.decisions:
+            self.assertTrue(decision.reason.strip(), "chaque decision doit avoir une raison")
+        self.assertEqual(len(plan.logger.by_decision(CREEE)), 1)
+
+    def test_option_idaya_uniquement_sur_les_creations(self):
+        _, _ = self.run_pipeline(Options(auto_number_idaya=True))
+        ws = self.sheet()
+        self.assertEqual(self.cell(ws, L_CREEE, "IDAYA"), 13)
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "IDAYA"), 1)
+
+
+class TestFichiers(BaseCase):
+    def test_reference_feuille_feuil2(self):
         session = Session(Selection(reference=self.files["reference"], target=self.files["target"],
                                     kam=self.files["kam"]))
         try:
             data = session.load()
-            # en-tetes en ligne 2 dans la Reference, colonnes reconnues par leur nom
-            self.assertEqual(data.reference.layout.header_row, 2)
-            self.assertEqual(data.reference.layout.col("STORE"), 6)
-            # la feuille parasite 'Notes' ne doit pas etre choisie
+            self.assertEqual(data.reference.layout.title, "Feuil2")
+            self.assertEqual(data.reference.layout.header_row, 1)
+            self.assertEqual(data.reference.layout.col("Divisions"), 3)
+            self.assertEqual(data.reference.layout.col("Working Days"), 12)
             self.assertEqual(data.target.layout.title, SHEET)
-            self.assertEqual(data.target.layout.header_row, 1)
-            # le fichier 3 expose bien une feuille par division
             self.assertEqual(data.kam.divisions, ["DA", "VD"])
         finally:
             session.close()
 
-    def test_colonne_obligatoire_manquante(self):
-        wb = openpyxl.load_workbook(self.files["target"])
-        ws = wb[SHEET]
-        ws.cell(1, COL["Column1"], "Autre chose")            # on casse une colonne obligatoire
-        broken = self.folder / "CASSE.xlsx"
-        wb.save(broken)
-        session = Session(Selection(reference=self.files["reference"], target=broken, kam=self.files["kam"]))
-        with self.assertRaises(PipelineError) as error:
-            session.load()
-        self.assertIn("Column1", str(error.exception))
+    def test_repli_par_position_si_entetes_illisibles(self):
+        wb = openpyxl.load_workbook(self.files["reference"])
+        ws = wb["Feuil2"]
+        for column in (3, 6, 7, 8, 9, 10, 12):
+            ws.cell(1, column, f"colonne {column}")          # en-tetes rendus illisibles
+        cassee = self.folder / "REF_SANS_ENTETES.xlsx"
+        wb.save(cassee)
+        self.files["reference"] = cassee
+        plan, _ = self.run_pipeline()
+        ws2 = self.sheet()
+        self.assertEqual(self.cell(ws2, L_VD_EXISTANT, "Promoter"), "PROMO VD KENITRA")
+        self.assertEqual(plan.stats.lignes_ajoutees, 1)
 
-
-class TestReglesLignes(BaseCase):
-    def test_store_vide_ligne_entierement_rouge_et_intacte(self):
-        plan, result = self.run_pipeline()
-        self.assertEqual(plan.stats.red_rows, 1)
-        self.assertEqual(result.colored_rows, 1)
-        _wb, ws = self.result_sheet()
-        for column in COL:
-            self.assertEqual(ws.cell(5, COL[column]).fill.start_color.rgb, "FFFF0000",
-                             f"colonne {column} non coloree")
-        # aucune valeur modifiee sur cette ligne
-        self.assertEqual(cell(ws, 5, "ID Promoter"), "ID_ORPHELIN")
-        self.assertEqual(cell(ws, 5, "Promoter"), "PROMO ORPHELIN")
-        self.assertEqual(cell(ws, 5, "Store"), None)
-        self.assertEqual(cell(ws, 5, "KAM"), "KAM X")
-
-    def test_ligne_existante_corrigee_depuis_la_reference(self):
-        self.run_pipeline()
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 2, "ID Promoter"), "HT204806")
-        self.assertEqual(cell(ws, 2, "Promoter"), "ROUAK MOULAY HICHAM")
-        self.assertEqual(cell(ws, 2, "Division"), "VD+DA")   # valeur brute de la Reference
-        self.assertEqual(cell(ws, 2, "Division1"), "VD")     # division de la ligne
-        self.assertEqual(cell(ws, 2, "DAY"), 26)             # Working Days, ecrit comme un nombre
-        self.assertEqual(cell(ws, 2, "Column1"), "C000114373VD")
-
-    def test_vd_plus_da_cree_une_seule_ligne_supplementaire(self):
-        plan, result = self.run_pipeline()
-        self.assertEqual(plan.stats.created_rows, 1)
-        self.assertEqual(result.created_rows, 1)
-        _wb, ws = self.result_sheet()
-        self.assertEqual(ws.max_row, 10)
-        self.assertEqual(cell(ws, 10, "Column1"), "C000114373DA")
-        self.assertEqual(cell(ws, 10, "Division1"), "DA")
-        self.assertEqual(cell(ws, 10, "ID Promoter"), "HT204806")
-        self.assertEqual(cell(ws, 10, "DAY"), 26)
-        # valeurs recopiees depuis la ligne soeur du meme magasin
-        self.assertEqual(cell(ws, 10, "Annee"), 2026)
-        self.assertEqual(cell(ws, 10, "STATUT"), "Actif")
-        # IDAYA volontairement vide : aucune regle ne dit comment le calculer
-        self.assertIsNone(cell(ws, 10, "IDAYA"))
-
-    def test_pas_de_duplicate_quand_la_cle_existe(self):
-        plan, _result = self.run_pipeline()
-        _wb, ws = self.result_sheet()
-        keys = [cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
-        self.assertEqual(len(keys), len(set(keys)), f"cles dupliquees : {keys}")
-        self.assertGreaterEqual(plan.stats.duplicates_avoided, 4)
-
-    def test_meme_store_deux_promoteurs_ne_sont_pas_melanges(self):
-        self.run_pipeline()
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 3, "Promoter"), "HASBI ABDELLAH")       # VD
-        self.assertEqual(cell(ws, 3, "DAY"), 24)
-        self.assertEqual(cell(ws, 4, "Promoter"), "BAGHDADI ABDELMOUIJIB")  # DA
-        self.assertEqual(cell(ws, 4, "DAY"), 26)
-
-    def test_kam_recupere_par_store_et_division(self):
-        plan, _result = self.run_pipeline()
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 2, "KAM"), "KAM VD1")
-        self.assertEqual(cell(ws, 10, "KAM"), "KAM DA1")
-        self.assertEqual(cell(ws, 3, "KAM"), "KAM VD2")
-        self.assertEqual(plan.stats.kam_found, 5)
-
-    def test_store_absent_de_la_reference_signale_et_intact(self):
-        plan, _result = self.run_pipeline()
-        self.assertEqual(plan.stats.store_not_found, 1)
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 6, "ID Promoter"), "ID_INCONNU")
-        self.assertEqual(cell(ws, 6, "KAM"), "KAM Y")
-
-    def test_division_inconnue_non_traitee_mais_signalee(self):
-        plan, _result = self.run_pipeline()
-        messages = [entry.message for entry in plan.logger.by_level("A VERIFIER")]
-        self.assertTrue(any("RAC" in message for message in messages), messages)
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 7, "ID Promoter"), "RAC11111")
-        self.assertEqual(cell(ws, 7, "KAM"), "KAM Z")        # ligne totalement intacte
-
-    def test_conflit_deux_promoteurs_meme_division_non_traite(self):
-        plan, _result = self.run_pipeline()
-        messages = [entry.message for entry in plan.logger.by_level("A VERIFIER")]
-        self.assertTrue(any("2 promoteurs differents" in message for message in messages), messages)
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 8, "ID Promoter"), "CONF0000")
-        self.assertEqual(cell(ws, 8, "Promoter"), "PROMO INCONNU")
-
-    def test_cle_incoherente_rapprochee_sans_duplicate(self):
-        plan, _result = self.run_pipeline()
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 9, "Code Store"), "C999999999")
-        self.assertEqual(cell(ws, 9, "Column1"), "C999999999VD")
-        self.assertEqual(cell(ws, 9, "KAM"), "KAM VD3")
-        self.assertEqual(plan.stats.created_rows, 1)         # aucune creation parasite
-
-
-class TestFichiers(BaseCase):
-    def test_fichiers_sources_jamais_modifies(self):
+    def test_sources_jamais_modifiees(self):
         self.run_pipeline()
         for name, path in self.files.items():
-            self.assertEqual(md5(path), self.hashes[name], f"{name} a ete modifie !")
+            self.assertEqual(md5(path), self.hashes[name], f"{name} a ete modifie")
 
     def test_sortie_ne_peut_pas_ecraser_une_source(self):
         with self.assertRaises(PipelineError):
@@ -209,26 +309,12 @@ class TestFichiers(BaseCase):
 
     def test_mise_en_forme_conservee(self):
         self.run_pipeline()
-        wb, ws = self.result_sheet()
-        self.assertIn("Notes", wb.sheetnames)                # les autres feuilles restent
+        ws = self.sheet()
+        self.assertIn("Notes", self.wb.sheetnames)
         self.assertEqual(ws.freeze_panes, "A2")
-        table = list(ws.tables.values())[0]
-        self.assertEqual(table.ref, "A1:N10")                # tableau agrandi pour la ligne creee
-        self.assertTrue(ws.cell(1, 1).font.b)                # en-tetes toujours en gras
-        self.assertEqual(ws.cell(10, 1).font.name, ws.cell(9, 1).font.name)  # style recopie
-
-    def test_traitement_idempotent(self):
-        self.run_pipeline()
-        second = self.folder / "RESULTAT2.xlsx"
-        session = Session(Selection(reference=self.files["reference"], target=self.output, kam=self.files["kam"]))
-        try:
-            session.load()
-            plan = session.analyze()
-            session.apply(second, write_report=False)
-        finally:
-            session.close()
-        self.assertEqual(plan.stats.updated_rows, 0, "un 2e passage ne doit plus rien modifier")
-        self.assertEqual(plan.stats.created_rows, 0, "un 2e passage ne doit plus rien creer")
+        self.assertEqual(list(ws.tables.values())[0].ref, f"A1:N{L_CREEE}")
+        self.assertTrue(ws.cell(1, 1).font.b)
+        self.assertEqual(ws.cell(L_CREEE, 1).font.name, ws.cell(L_CREEE - 1, 1).font.name)
 
     def test_rapport_genere(self):
         session = Session(Selection(reference=self.files["reference"], target=self.files["target"],
@@ -236,49 +322,22 @@ class TestFichiers(BaseCase):
         try:
             session.load()
             session.analyze()
-            _result, reports = session.apply(self.output, write_report=True)
+            _, reports = session.apply(self.output, write_report=True)
         finally:
             session.close()
         self.assertEqual(len(reports), 2)
-        for report in reports:
-            self.assertTrue(Path(report).exists())
-        self.assertIn("Store vide", Path(reports[0]).read_text(encoding="utf-8"))
-
-
-class TestOptions(BaseCase):
-    def test_option_ajouter_les_stores_absents_du_fichier2(self):
-        plan, _result = self.run_pipeline(Options(add_missing_reference_stores=True))
-        _wb, ws = self.result_sheet()
-        keys = [cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
-        self.assertIn("C555555555VD", keys)
-        self.assertGreaterEqual(plan.stats.created_rows, 2)
-
-    def test_option_divisions_inconnues(self):
-        self.run_pipeline(Options(process_unknown_divisions=True))
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 7, "ID Promoter"), "RAC11111")
-        self.assertEqual(cell(ws, 7, "DAY"), 17)             # Working Days de la Reference applique
-        self.assertEqual(cell(ws, 7, "Column1"), "C888888888RAC")
-
-    def test_option_idaya_automatique(self):
-        self.run_pipeline(Options(auto_number_idaya=True))
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 10, "IDAYA"), 9)           # 8 lignes existantes -> 9
-
-    def test_option_city(self):
-        self.run_pipeline(Options(update_city=True))
-        _wb, ws = self.result_sheet()
-        self.assertEqual(cell(ws, 9, "City"), "Fes")
+        texte = Path(reports[0]).read_text(encoding="utf-8")
+        for mot in ("ROUGE", "MODIFIEE", "CREEE", "CONFORME", "A VERIFIER", "IGNOREE", "STORE NON TROUVE"):
+            self.assertIn(mot, texte)
 
 
 class TestMatcher(unittest.TestCase):
     def test_normalisation(self):
         self.assertEqual(norm_store("  Aswak   Assalam  Mohammédia "), "aswak assalam mohammedia")
-        self.assertEqual(norm_store("ASWAK-ASSALAM"), "aswak assalam")
         self.assertEqual(build_key(" c003470765 ", "vd"), "C003470765VD")
+        self.assertNotEqual(build_key("C003470765", "VD"), build_key("C003470765", "DA"))
         self.assertEqual(split_divisions("VD+DA"), ["VD", "DA"])
-        self.assertEqual(split_divisions("VD / DA"), ["VD", "DA"])
-        self.assertEqual(split_divisions(None), [])
+        self.assertEqual(split_divisions("RAC"), ["RAC"])
 
 
 if __name__ == "__main__":

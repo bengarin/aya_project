@@ -120,14 +120,21 @@ class Session:
             )
         if not kam.divisions:
             warnings.append(
-                "Le fichier 3 ne contient pas de feuille 'VD' / 'DA' : le KAM sera cherche "
-                "uniquement par nom de magasin (toutes divisions confondues)."
+                "Le fichier 3 ne contient aucune feuille 'VD' / 'DA' : le KAM ne peut pas etre "
+                "cherche par Store + Division comme l'exigent les regles."
             )
         elif len(kam.divisions) == 1:
             warnings.append(
                 f"Le fichier 3 ne contient qu'une feuille de division ({kam.divisions[0]}) : "
-                "les autres divisions n'auront pas de KAM."
+                "les Stores de l'autre division n'auront pas de KAM (colonne laissee vide)."
             )
+        for layout, label in ((reference.layout, "Fichier 1"), (target.layout, "Fichier 2")):
+            if layout.positional:
+                warnings.append(
+                    f"{label} : en-tetes non reconnus par leur nom, les colonnes ont ete prises "
+                    f"par POSITION sur la feuille '{layout.title}' (ligne d'en-tetes "
+                    f"{layout.header_row}). Verifiez les colonnes detectees."
+                )
         self.data = LoadedData(reference=reference, target=target, kam=kam, warnings=warnings)
         if progress:
             progress("Fichiers charges.", 0.35)
