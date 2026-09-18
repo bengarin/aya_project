@@ -82,11 +82,14 @@ TARGET_ROWS = [
     # 11 : aucun KAM dans le fichier 3 -> KAM vide (rien d'invente)
     [2026, "Juillet", "VD", "VD", "ANCIEN KAM NOKAM", "IDNOKAM600", "C600", "PROMO SANS KAM",
      "Store NoKam", "Safi", "Actif", 26, 10, "C600VD"],
-    # 12 et 13 : meme cle C700VD sur 2 lignes (2 noms de Store, meme Code Store)
+    # 12 : Store Alias A + VD -> retrouve SA ligne par le nom du Store
     [2026, "Juillet", "VD", "VD", "KAM VD ALIAS", "ANCIEN_ALIAS", "C700", "ANCIEN PROMO ALIAS",
      "Store Alias A", "Rabat", "Actif", 26, 11, "C700VD"],
-    [2026, "Juillet", "VD", "VD", "KAM VD ALIAS", "ANCIEN_ALIAS", "C700", "ANCIEN PROMO ALIAS",
-     "Store Alias B", "Rabat", "Actif", 26, 12, "C700VD"],
+    # 13 : Store Alias B (meme Code Store C700 dans la Reference, mais ici en DA).
+    # Son affectation VD ne peut pas etre creee : la cle C700VD existe deja
+    # -> vrai "duplicate evite". Sa ligne DA n'existe pas dans la Reference -> IGNOREE.
+    [2026, "Juillet", "DA", "DA", "KAM VD ALIAS", "ANCIEN_ALIAS", "C700", "ANCIEN PROMO ALIAS",
+     "Store Alias B", "Rabat", "Actif", 26, 12, "C700DA"],
 ]
 
 # --- Fichier 3 : Affectation KAM (City, Code store, Store, KAM) en B..E, en-tetes ligne 2

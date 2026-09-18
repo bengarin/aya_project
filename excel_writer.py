@@ -128,6 +128,11 @@ def apply_plan(
             col = layout.col(change.column)
             if not col:
                 continue
+            if _is_formula(ws.cell(update.row, col).value):
+                # Securite : une cellule calculee n'est jamais ecrasee.
+                log.log(INFO, f"Formule conservee dans la colonne {change.column}",
+                        row=update.row, store=update.store, division=update.division)
+                continue
             ws.cell(update.row, col).value = _coerce(change.new, change.column)
             result.updated_cells += 1
 
@@ -161,10 +166,21 @@ def apply_plan(
         for offset, creation in enumerate(plan.creations):
             row = start_row + offset
             template = creation.template_row or layout.last_data_row
+            # 1. La nouvelle ligne est une COPIE de la ligne soeur : mise en forme,
+            #    valeurs et formules des colonnes qu'on ne remplit pas (demande
+            #    explicite : "les champs que je ne remplis pas -> duplicate").
             _copy_row_style(ws, template, row, first_col, last_col)
+            _duplicate_row_values(ws, template, row, first_col, last_col)
+            # 2. Puis on ecrit par-dessus ce que la Reference impose, sans jamais
+            #    ecraser une cellule qui contient une formule.
             for name, col in layout.columns.items():
-                if name in creation.values:
-                    ws.cell(row, col).value = _coerce(creation.values.get(name, ""), name)
+                if name not in creation.values:
+                    continue
+                if _is_formula(ws.cell(row, col).value):
+                    log.log(INFO, f"Ligne {row} : formule conservee dans la colonne {name}",
+                            row=row, store=creation.store, division=creation.division)
+                    continue
+                ws.cell(row, col).value = _coerce(creation.values.get(name, ""), name)
             result.created_rows += 1
             log.log(
                 INFO,
@@ -188,6 +204,33 @@ def apply_plan(
         raise ExcelWriteError(f"Echec de l'enregistrement : {exc}") from exc
 
     return result
+
+
+def _is_formula(value) -> bool:
+    """Vrai si la cellule contient une formule Excel (=...)."""
+    return isinstance(value, str) and value.startswith("=")
+
+
+def _duplicate_row_values(ws, source_row: int, dest_row: int, first_col: int, last_col: int) -> None:
+    """Recopie les VALEURS d'une ligne modele vers une nouvelle ligne.
+
+    Les formules sont recopiees en ajustant leurs references de ligne
+    (=A2*B2 en ligne 2 devient =A3*B3 en ligne 3), exactement comme un
+    copier-coller Excel.
+    """
+    from openpyxl.formula.translate import Translator
+
+    for col in range(first_col, last_col + 1):
+        source = ws.cell(source_row, col)
+        value = source.value
+        if _is_formula(value):
+            try:
+                value = Translator(value, origin=source.coordinate).translate_formula(
+                    ws.cell(dest_row, col).coordinate
+                )
+            except Exception:                                # pragma: no cover - formule exotique
+                pass
+        ws.cell(dest_row, col).value = value
 
 
 def _copy_row_style(ws, source_row: int, dest_row: int, first_col: int, last_col: int) -> None:

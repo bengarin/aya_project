@@ -153,6 +153,7 @@ class Processor:
         self._decided_rows: set[int] = set()     # lignes qui ont deja leur decision
         self._used_rows: set[int] = set()        # lignes deja rattachees a une cle
         self._keys_traitees: set[str] = set()    # cles deja traitees (update ou create)
+        self._usage_cles: dict[str, list[str]] = {}   # cle -> Stores qui l'utilisent
         self._build_indexes()
 
     # ------------------------------------------------------------------
@@ -181,8 +182,23 @@ class Processor:
         numbers = [int(r.get("IDAYA")) for r in self.target.rows if r.get("IDAYA").strip().isdigit()]
         self._next_idaya = (max(numbers) + 1) if numbers else 1
 
-    def _candidates_for_key(self, key: str) -> list[TargetRow]:
-        """Lignes libres portant cette cle : d'abord Code Store + Division1, puis Column1."""
+    def _candidates_for_key(self, key: str, store_key: str = "", division: str = "") -> list[TargetRow]:
+        """Lignes libres qui correspondent a cette affectation, par ordre de confiance :
+
+        1. **meme Store + meme Division1** : le plus sur, parce que le nom du Store
+           est ce qui identifie vraiment le magasin (c'est ainsi qu'on le cherche
+           dans la Reference). Indispensable quand deux Stores differents partagent
+           le meme Store Code dans la Reference : chacun retrouve SA ligne.
+        2. Code Store (G) + Division1 (D) : la cle metier reconstruite.
+        3. la valeur ecrite dans Column1 (N), qui peut etre ancienne ou fausse.
+        """
+        if store_key and division:
+            rows = [
+                t for t in self._rows_by_store.get(store_key, [])
+                if t.row not in self._used_rows and norm_division(t.get("Division1")) == division
+            ]
+            if rows:
+                return rows
         for index in (self._rows_by_cells, self._rows_by_column1):
             rows = [t for t in index.get(key, []) if t.row not in self._used_rows]
             if rows:
@@ -221,6 +237,7 @@ class Processor:
                 progress(index, total)
 
         self._decider_lignes_restantes()
+        self._verifier_cles_en_double()
         return self.plan
 
     # ------------------------------------------------------------------
@@ -292,13 +309,14 @@ class Processor:
                 )
                 continue
 
-            self._traiter_affectation(next(iter(distinctes.values())), division, store_label)
+            self._traiter_affectation(next(iter(distinctes.values())), division, store_label, store_key)
 
     # ------------------------------------------------------------------
-    def _traiter_affectation(self, entry: ReferenceRow, division: str, store_label: str) -> None:
+    def _traiter_affectation(self, entry: ReferenceRow, division: str, store_label: str,
+                             store_key: str = "") -> None:
         """STEP 5 a 8 pour une combinaison Code Store + Division."""
         key = build_key(entry.store_code, division)
-        ligne = self._trouver_ligne(key)
+        ligne = self._trouver_ligne(key, store_key or norm_store(entry.store), division)
 
         # Regles 8 et 15 : un vrai duplicate evite = une CREATION annulee parce que
         # la combinaison Code Store + Division a deja ete traitee dans ce passage.
@@ -339,9 +357,9 @@ class Processor:
         self._keys_traitees.add(key)
 
     # ------------------------------------------------------------------
-    def _trouver_ligne(self, key: str) -> TargetRow | None:
+    def _trouver_ligne(self, key: str, store_key: str = "", division: str = "") -> TargetRow | None:
         """STEP 5 : la combinaison Code Store + Division existe-t-elle deja ? (regles 8, 9, 10)"""
-        candidates = self._candidates_for_key(key)
+        candidates = self._candidates_for_key(key, store_key, division)
         if not candidates:
             return None
         choisie = candidates[0]
@@ -375,12 +393,21 @@ class Processor:
     # ------------------------------------------------------------------
     def _planifier_update(self, trow: TargetRow, valeurs: dict[str, str], entry: ReferenceRow,
                           division: str, store_label: str, key: str, kam_reason: str) -> None:
-        changes = [
-            CellChange(column=name, old=trow.get(name), new=valeur)
-            for name, valeur in valeurs.items()
-            if name in self.target.layout.columns and trow.get(name) != valeur
-        ]
+        self._usage_cles.setdefault(key, []).append(store_label or entry.store)
+        changes: list[CellChange] = []
+        formules: list[str] = []
+        for name, valeur in valeurs.items():
+            if name not in self.target.layout.columns or trow.get(name) == valeur:
+                continue
+            if trow.is_formula(name):
+                # La cellule contient une FORMULE : on n'y touche jamais, elle se
+                # recalcule toute seule (demande explicite de l'utilisateur).
+                formules.append(name)
+                continue
+            changes.append(CellChange(column=name, old=trow.get(name), new=valeur))
         source = f"Reference ligne {entry.source_row} (Divisions={entry.divisions_raw})"
+        if formules:
+            source += f" | formule conservee : {', '.join(formules)}"
         if not changes:
             self.plan.stats.lignes_conformes += 1
             self._decide(
@@ -427,6 +454,7 @@ class Processor:
                 complet["IDAYA"] = ""
                 notes.append("IDAYA laisse vide (option de numerotation desactivee)")
 
+        self._usage_cles.setdefault(key, []).append(complet.get("Store", store_label))
         self.plan.creations.append(
             RowCreation(store=complet.get("Store", store_label), division=division,
                         key=key, values=complet, template_row=soeur.row if soeur else None)
@@ -467,7 +495,7 @@ class Processor:
         """Lignes du fichier 2 concernees par une division non traitee (RAC, conflit)."""
         trouvees: list[TargetRow] = []
         for entry in entries:
-            for trow in self._candidates_for_key(build_key(entry.store_code, division)):
+            for trow in self._candidates_for_key(build_key(entry.store_code, division), store_key, division):
                 if trow not in trouvees:
                     trouvees.append(trow)
         if not trouvees:
@@ -477,6 +505,24 @@ class Processor:
         for trow in trouvees:
             self._used_rows.add(trow.row)
         return trouvees
+
+    # ------------------------------------------------------------------
+    def _verifier_cles_en_double(self) -> None:
+        """Signale les cles Code Store + Division utilisees par PLUSIEURS Stores.
+
+        Cela arrive quand la Reference donne le meme Store Code a deux magasins
+        differents : chacun garde bien ses infos, mais les deux lignes finissent
+        avec le meme Column1. Le logiciel ne choisit pas : il le signale.
+        """
+        for key, stores in self._usage_cles.items():
+            distincts = sorted({s for s in stores if s})
+            if len(distincts) > 1:
+                self._verifier(
+                    " / ".join(distincts), "", key,
+                    f"La cle {key} est utilisee par {len(distincts)} Stores differents "
+                    f"({', '.join(distincts)}) : ils ont le meme Store Code dans la Reference. "
+                    "Chaque ligne garde ses propres infos, mais Column1 sera identique.",
+                )
 
     # ------------------------------------------------------------------
     def _decider_lignes_restantes(self) -> None:

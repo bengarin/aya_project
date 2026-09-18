@@ -80,10 +80,19 @@ Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
 
 ### Comment une ligne existante est reconnue
 Dans cet ordre de confiance :
-1. `Code Store (G) + Division1 (D)` — la vraie cle metier ;
-2. la valeur ecrite dans `Column1 (N)` — qui peut etre ancienne ou fausse.
+1. **`Store (I)` + `Division1 (D)`** — le nom du magasin est ce qui l'identifie vraiment
+   (c'est ainsi qu'on le cherche dans la Reference). Indispensable quand deux magasins
+   partagent le meme `Store Code` dans la Reference : chacun retrouve **sa** ligne ;
+2. `Code Store (G) + Division1 (D)` — la cle metier reconstruite ;
+3. la valeur ecrite dans `Column1 (N)` — qui peut etre ancienne ou fausse.
 
 C'est ce qui permet de corriger une `Column1` erronee (regle 12) sans creer de doublon.
+Si deux magasins differents finissent avec la meme cle, c'est signale en `A VERIFIER`.
+
+### Cellules calculees
+Une cellule qui contient une **formule** n'est jamais ecrasee : elle se recalcule
+toute seule. Sur une ligne creee, les formules de la ligne du meme `Code Store`
+sont recopiees en ajustant leurs references (comme un copier-coller Excel).
 
 ---
 
@@ -125,10 +134,12 @@ du fichier 2, avec la raison et le detail des cellules changees :
 1. **Colonne `Division` (C) quand la Reference vaut `VD+DA`** : la valeur brute
    `VD+DA` est ecrite en C et la division reelle (`VD` ou `DA`) en D (`Division1`).
    Pour une Reference `VD` ou `DA`, C et D contiennent la meme valeur, comme exige.
-2. **`Annee`, `Mois`, `STATUT` d'une ligne CREEE** : la Reference ne les contient pas.
-   Ils sont recopies depuis la ligne du **meme Code Store** deja presente dans le
-   fichier 2 ; s'il n'y en a pas, ils restent vides et la ligne passe en `A VERIFIER`.
-   Le rapport indique toujours la ligne source.
+2. **Colonnes d'une ligne CREEE que la Reference ne fournit pas** (`Annee`, `Mois`,
+   `STATUT`, colonnes supplementaires) : la nouvelle ligne est une **copie** de la
+   ligne du meme `Code Store` deja presente dans le fichier 2 (valeurs, formules et
+   mise en forme), puis les colonnes de la Reference sont ecrites par-dessus.
+   S'il n'y a aucune ligne a copier, elles restent vides et la ligne passe en
+   `A VERIFIER`. Le rapport indique toujours la ligne source.
 3. **`KAM` introuvable** : rien n'est invente. La colonne recoit le marqueur
    **`#`** (decision explicite de l'utilisateur, meme convention deja presente
    dans son fichier), que la ligne soit existante ou creee. C'est toujours
@@ -161,7 +172,7 @@ kam_service.py     recherche du KAM par Store + Division
 processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
 excel_writer.py    application du plan, ecriture d'un nouveau fichier
 logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
-tests/             fixtures Excel + 25 tests automatiques
+tests/             fixtures Excel + 28 tests automatiques
 ```
 
 ---
@@ -172,13 +183,14 @@ tests/             fixtures Excel + 25 tests automatiques
 python -m unittest discover -s tests -v
 ```
 
-25 tests, dont les **10 cas obligatoires** :
+28 tests, dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
 Plus : RAC non traite, KAM vide si introuvable, colonnes jamais touchees, statistiques
 exactes, rapport explicatif, sources non modifiees, mise en forme conservee,
-detection par position quand les en-tetes sont illisibles.
+detection par position quand les en-tetes sont illisibles, reconnaissance de la
+ligne par le nom du Store, formules jamais ecrasees, copie complete de la ligne soeur.
 
 ---
 

@@ -493,9 +493,14 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
 class TargetRow:
     row: int
     values: dict[str, str]           # nom canonique -> texte affiche (valeur calculee incluse)
+    formulas: set[str] = field(default_factory=set)   # colonnes qui contiennent une FORMULE
 
     def get(self, name: str) -> str:
         return self.values.get(name, "")
+
+    def is_formula(self, name: str) -> bool:
+        """Vrai si cette colonne contient une formule : on n'y touche jamais."""
+        return name in self.formulas
 
 
 @dataclass
@@ -552,9 +557,11 @@ def load_target(path: str | Path, sheet: str | None = None) -> TargetData:
         formula_without_value = 0
         for r in range(layout.header_row + 1, layout.last_data_row + 1):
             values: dict[str, str] = {}
+            formulas: set[str] = set()
             for name, idx in layout.columns.items():
                 raw = ws.cell(r, idx).value
                 if isinstance(raw, str) and raw.startswith("="):
+                    formulas.add(name)                      # cellule calculee : intouchable
                     resolved = cached.get((r, idx))
                     if resolved is None:
                         formula_without_value += 1
@@ -563,7 +570,7 @@ def load_target(path: str | Path, sheet: str | None = None) -> TargetData:
                         values[name] = cell_to_text(resolved)
                 else:
                     values[name] = cell_to_text(raw if raw is not None else cached.get((r, idx)))
-            rows.append(TargetRow(row=r, values=values))
+            rows.append(TargetRow(row=r, values=values, formulas=formulas))
         if formula_without_value:
             warnings.append(
                 f"{formula_without_value} cellule(s) contiennent une formule sans resultat enregistre "

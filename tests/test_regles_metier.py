@@ -204,7 +204,7 @@ class TestCasObligatoires(BaseCase):
         self.assertEqual(plan.stats.lignes_ajoutees, 0)
         self.assertEqual(ws.max_row, lignes_apres_1)
         cles = [self.cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
-        self.assertEqual(len(cles), len(set(cles)) + 1)   # seul le doublon deja present reste
+        self.assertEqual(len(cles), len(set(cles)), f"aucune cle ne doit apparaitre 2 fois : {cles}")
         self.assertEqual(premier.stats.lignes_analysees + 1, plan.stats.lignes_analysees)
 
 
@@ -236,8 +236,9 @@ class TestAutresRegles(BaseCase):
         plan, _ = self.run_pipeline()
         self.assertEqual(plan.stats.duplicates_evites, 1)
         self.assertLess(plan.stats.duplicates_evites, plan.stats.lignes_analysees)
+        # Chaque Store retrouve SA ligne par le nom, meme avec un Code Store partage.
         self.assertEqual(self.decision_of(plan, L_ALIAS_A), MODIFIEE)
-        self.assertEqual(self.decision_of(plan, L_ALIAS_B), A_VERIFIER)
+        self.assertEqual(self.decision_of(plan, L_ALIAS_B), IGNOREE)
 
     def test_colonnes_jamais_touchees(self):
         _, _ = self.run_pipeline()
@@ -253,7 +254,7 @@ class TestAutresRegles(BaseCase):
         attendu = {
             "Lignes analysees": 12, "Lignes modifiees": 5, "Lignes deja conformes": 1,
             "Lignes ajoutees": 1, "Lignes Store vide": 1, "Stores non trouves": 1,
-            "KAM trouves": 6, "KAM non trouves": 1, "Duplicates evites": 1, "A verifier": 4,
+            "KAM trouves": 6, "KAM non trouves": 1, "Duplicates evites": 1, "A verifier": 3,
         }
         self.assertEqual(dict(plan.stats.as_pairs()), attendu)
 
@@ -344,3 +345,50 @@ class TestMatcher(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCorrectionsRecentes(BaseCase):
+    """Les 3 points corriges apres l'audit : nom du Store, formules, copie de ligne."""
+
+    def test_chaque_store_retrouve_sa_ligne_par_le_nom(self):
+        """Deux Stores differents avec le MEME Store Code : chacun garde SA ligne."""
+        plan, _ = self.run_pipeline()
+        ws = self.sheet()
+        # Store Alias A a bien recu SES infos (et pas celles de Store Alias B)
+        self.assertEqual(self.cell(ws, L_ALIAS_A, "Store"), "Store Alias A")
+        self.assertEqual(self.cell(ws, L_ALIAS_A, "ID Promoter"), "IDALIASA")
+        self.assertEqual(self.cell(ws, L_ALIAS_A, "Promoter"), "PROMO ALIAS A")
+        # La ligne de Store Alias B n'a pas ete ecrasee par les infos de A
+        self.assertEqual(self.cell(ws, L_ALIAS_B, "Store"), "Store Alias B")
+        self.assertEqual(self.cell(ws, L_ALIAS_B, "ID Promoter"), "ANCIEN_ALIAS")
+
+    def test_formule_jamais_ecrasee(self):
+        """Une cellule qui contient une formule reste une formule."""
+        wb = openpyxl.load_workbook(self.files["target"])
+        ws = wb[SHEET]
+        # Column1 devient une formule sur la ligne a modifier
+        ws.cell(L_VD_EXISTANT, COL["Column1"], "=G2&D2")
+        avec_formule = self.folder / "BDD_FORMULE.xlsx"
+        wb.save(avec_formule)
+
+        self.run_pipeline(target=avec_formule)
+        ws2 = self.sheet()
+        self.assertEqual(self.cell(ws2, L_VD_EXISTANT, "Column1"), "=G2&D2")
+        # le reste de la ligne a bien ete corrige
+        self.assertEqual(self.cell(ws2, L_VD_EXISTANT, "Promoter"), "PROMO VD KENITRA")
+
+    def test_ligne_creee_copie_la_ligne_soeur(self):
+        """Les colonnes non fournies par la Reference sont dupliquees, formules incluses."""
+        wb = openpyxl.load_workbook(self.files["target"])
+        ws = wb[SHEET]
+        ws.cell(1, 15, "Remarque")                       # colonne O, hors des colonnes connues
+        ws.cell(L_VDDA_VD, 15, "note du mois")           # sur la ligne soeur (meme Code Store)
+        ws.cell(L_VDDA_VD, COL["IDAYA"], "=ROW()-1")     # formule sur la ligne soeur
+        avec_extra = self.folder / "BDD_EXTRA.xlsx"
+        wb.save(avec_extra)
+
+        self.run_pipeline(target=avec_extra)
+        ws2 = self.sheet()
+        self.assertEqual(self.cell(ws2, L_CREEE, "Column1"), "C200DA")       # ligne bien creee
+        self.assertEqual(ws2.cell(L_CREEE, 15).value, "note du mois")        # colonne O dupliquee
+        self.assertEqual(ws2.cell(L_CREEE, COL["IDAYA"]).value, "=ROW()-1")  # formule dupliquee
