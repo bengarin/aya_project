@@ -67,7 +67,7 @@ Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
 | 5 | **Cle de traitement** | `Code Store + Division`. `C003470765VD` et `C003470765DA` sont **deux cles differentes**. Le Store seul ne suffit jamais. |
 | 6 | **Cle presente dans le fichier 2** | La ligne existante est **mise a jour** (jamais de 2e ligne). |
 | 7 | **Cle absente** | Une nouvelle ligne est **creee**. |
-| 8 | **KAM** | Recherche par **Store + Division** (feuille VD ou feuille DA). KAM introuvable = colonne KAM **laissee vide** + signale. Jamais de KAM copie d'une division a l'autre. |
+| 8 | **KAM** | Recherche par **Store + Division** (feuille VD ou feuille DA). KAM introuvable = **ancienne valeur conservee** sur une ligne existante (vide sur une ligne creee) + signale. Jamais de KAM copie d'une division a l'autre. |
 | 9 | **Column1** | Toujours recalculee : `Code Store + Division1`, uniquement quand le Code Store et la Division viennent de la Reference. Une ancienne valeur fausse est corrigee. |
 | 10 | **IDAYA** | N'est jamais une cle de duplicate. Les IDAYA existants ne sont jamais modifies. L'option de numerotation ne touche que les lignes **creees**. |
 
@@ -129,9 +129,10 @@ du fichier 2, avec la raison et le detail des cellules changees :
    Ils sont recopies depuis la ligne du **meme Code Store** deja presente dans le
    fichier 2 ; s'il n'y en a pas, ils restent vides et la ligne passe en `A VERIFIER`.
    Le rapport indique toujours la ligne source.
-3. **`KAM` introuvable** : la colonne est **videe** (regle 11 : "ne pas inventer,
-   laisser vide, signaler"). L'ancienne valeur, non justifiee par le fichier 3,
-   n'est pas conservee.
+3. **`KAM` introuvable** : rien n'est invente, et c'est signale dans le rapport.
+   Sur une ligne **existante**, l'ancienne valeur du fichier 2 est **conservee**
+   (decision explicite de l'utilisateur). Sur une ligne **creee**, il n'y a pas
+   d'ancienne valeur : la colonne reste vide.
 
 ---
 

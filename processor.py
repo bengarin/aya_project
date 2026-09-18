@@ -311,15 +311,19 @@ class Processor:
             self.plan.stats.kam_trouves += 1
             kam_reason = f"KAM '{kam_value}' trouve dans la feuille {division} du fichier 3."
         else:
-            kam_value = ""                                  # regle 11 : ne rien inventer, laisser vide
+            # KAM introuvable : on ne devine rien, mais on ne vide pas non plus une
+            # valeur deja presente dans le fichier 2 (decision explicite de l'utilisateur).
+            # Ligne existante -> ancienne valeur conservee. Nouvelle ligne -> rien a garder.
+            kam_value = ligne.get("KAM") if ligne is not None else ""
             self.plan.stats.kam_non_trouves += 1
             motif = {
                 NOT_FOUND: "Store absent du fichier 3",
                 WRONG_DIVISION: f"Store absent de la feuille {division} du fichier 3",
                 AMBIGUOUS: "plusieurs KAM differents pour ce Store dans le fichier 3",
             }.get(kam_result.status, "KAM introuvable")
-            kam_reason = f"KAM non trouve ({motif}) : colonne KAM laissee vide."
-            self.log.log(KAM_NON_TROUVE, f"{motif} -> KAM laisse vide",
+            action = f"valeur existante '{kam_value}' conservee" if kam_value else "colonne KAM laissee vide"
+            kam_reason = f"KAM non trouve ({motif}) : {action}."
+            self.log.log(KAM_NON_TROUVE, f"{motif} -> {action}",
                          row=ligne.row if ligne else None, store=store_label, division=division)
 
         valeurs = self._valeurs_reference(entry, division, key, kam_value)
