@@ -33,6 +33,10 @@ from matcher import build_key, norm_division, norm_store, split_divisions
 # Les seules divisions traitees automatiquement (regle 3).
 DIVISIONS_TRAITEES = ("VD", "DA")
 
+# Marqueur ecrit dans KAM quand aucun KAM n'est trouve dans le fichier 3
+# (decision explicite de l'utilisateur : ni invente, ni laisse a l'ancienne valeur).
+KAM_PLACEHOLDER = "#"
+
 # Colonnes du fichier 2 alimentees depuis la Reference (regles 4 et 5).
 #   Division (C), Division1 (D), KAM (E), ID Promoter (F), Code Store (G),
 #   Promoter (H), Store (I), City (J), DAY (L), Column1 (N)
@@ -311,17 +315,17 @@ class Processor:
             self.plan.stats.kam_trouves += 1
             kam_reason = f"KAM '{kam_value}' trouve dans la feuille {division} du fichier 3."
         else:
-            # KAM introuvable : on ne devine rien, mais on ne vide pas non plus une
-            # valeur deja presente dans le fichier 2 (decision explicite de l'utilisateur).
-            # Ligne existante -> ancienne valeur conservee. Nouvelle ligne -> rien a garder.
-            kam_value = ligne.get("KAM") if ligne is not None else ""
+            # KAM introuvable : on ne devine rien. Decision explicite de l'utilisateur :
+            # on ecrit le marqueur "#" (placeholder deja utilise dans son fichier),
+            # que la ligne soit existante ou creee.
+            kam_value = KAM_PLACEHOLDER
             self.plan.stats.kam_non_trouves += 1
             motif = {
                 NOT_FOUND: "Store absent du fichier 3",
                 WRONG_DIVISION: f"Store absent de la feuille {division} du fichier 3",
                 AMBIGUOUS: "plusieurs KAM differents pour ce Store dans le fichier 3",
             }.get(kam_result.status, "KAM introuvable")
-            action = f"valeur existante '{kam_value}' conservee" if kam_value else "colonne KAM laissee vide"
+            action = f"KAM ecrit comme '{KAM_PLACEHOLDER}'"
             kam_reason = f"KAM non trouve ({motif}) : {action}."
             self.log.log(KAM_NON_TROUVE, f"{motif} -> {action}",
                          row=ligne.row if ligne else None, store=store_label, division=division)

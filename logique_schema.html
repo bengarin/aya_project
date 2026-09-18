@@ -174,13 +174,13 @@
       <span class="legend-item"><span class="dot" style="background:var(--teal)"></span>VD+DA → 2 affectations</span>
       <span class="legend-item"><span class="dot" style="background:var(--blue)"></span>Modifier / Créer</span>
       <span class="legend-item"><span class="dot" style="background:var(--green)"></span>KAM trouvé</span>
-      <span class="legend-item"><span class="dot" style="background:var(--amber)"></span>KAM introuvable → ancienne valeur gardée</span>
+      <span class="legend-item"><span class="dot" style="background:var(--amber)"></span>KAM introuvable → écrit '#'</span>
     </div>
 
     <div class="flow-scroll">
       <figure>
         <svg class="flow" viewBox="0 0 720 1380" role="img"
-             aria-label="Organigramme : Store vide colore la ligne en rouge et arrete tout ; sinon on cherche le Store dans la Reference, on lit ses Divisions (VD, DA ou VD+DA traitees comme deux affectations separees), on modifie ou cree la ligne selon que la cle existe deja, puis on cherche le KAM par Store et Division dans le fichier 3 ; si le KAM est introuvable, l'ancienne valeur de la ligne est conservee.">
+             aria-label="Organigramme : Store vide colore la ligne en rouge et arrete tout ; sinon on cherche le Store dans la Reference, on lit ses Divisions (VD, DA ou VD+DA traitees comme deux affectations separees), on modifie ou cree la ligne selon que la cle existe deja, puis on cherche le KAM par Store et Division dans le fichier 3 ; si le KAM est introuvable, la colonne recoit le marqueur #.">
           <defs>
             <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"/>
@@ -295,7 +295,7 @@
           <line x1="210" y1="1180" x2="210" y2="1214" stroke="var(--amber)" stroke-width="2.2" marker-end="url(#a-amber)"/>
           <text x="222" y="1202" class="tag" fill="var(--amber)">non</text>
           <rect x="60" y="1216" width="300" height="52" rx="9" fill="var(--amber-bg)" stroke="var(--amber)"/>
-          <text x="210" y="1246" text-anchor="middle" fill="var(--amber)" font-weight="600">Garder l’ancienne valeur</text>
+          <text x="210" y="1246" text-anchor="middle" fill="var(--amber)" font-weight="600">Écrire &#39;#&#39;</text>
 
           <polyline points="555,1166 555,1288 210,1288 210,1302" fill="none" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
           <line x1="210" y1="1268" x2="210" y2="1302" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
@@ -308,7 +308,7 @@
           Store vide كيوقف كولشي (رومج برك، حتى بحث). ملي Store موجود، كنقلبو عليه فـ Reference،
           كنشوفو Divisions ديالو (VD+DA = جوج affectations بوحدها)، كل واحدة كنشوفو واش الكلي
           ديالها (Store+Division) كاينة فـ الفيشي 2 → نبدلوها، ولا خاصنا نزيدو سطر جديد. من بعد
-          كنقلبو على KAM بـ Store+Division فـ الفيشي 3 — ما لقيناهش؟ كنخليو القيمة اللي كانت موجودة.
+          كنقلبو على KAM بـ Store+Division فـ الفيشي 3 — ما لقيناهش؟ كنكتبو '#' (حتى لو كانت الخانة فيها قيمة قبل).
         </figcaption>
       </figure>
     </div>
@@ -427,13 +427,13 @@
       </div>
 
       <div class="case-card">
-        <div class="case-head"><span class="case-num">10</span><span class="case-title">KAM ما تلقاش → القيمة القديمة</span><span class="pill amber">KAM NON TROUVÉ</span></div>
+        <div class="case-head"><span class="case-num">10</span><span class="case-title">KAM ما تلقاش → يكتب '#'</span><span class="pill amber">KAM NON TROUVÉ</span></div>
         <div class="flow-row">
           <div class="chip src"><small>Fichier 3</small>Carrefour Ain Sebaa/DA<br>Gocom Hay Riad/VD → غير موجودين</div>
           <svg class="arrow-icon" width="22" height="14" viewBox="0 0 22 14"><path d="M0 7 H18 M12 1 L18 7 L12 13" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          <div class="chip warn"><small>نتيجة</small>KAM يبقى <b>'#'</b> (القيمة القديمة)</div>
+          <div class="chip warn"><small>نتيجة</small>KAM = <b>'#'</b></div>
         </div>
-        <p class="case-note">ما كيخترعش KAM. سطر جديد بلا Store فـ الفيشي 3 → KAM يبقى خاوي (ما كاينش قيمة قديمة يحتفظ بيها).</p>
+        <p class="case-note">ما كيخترعش KAM، وما كيخليش أي قيمة قديمة (حتى لو كانت شي حاجة أخرى) : ديما '#'، سطر موجود ولا سطر جديد بحال بحال.</p>
       </div>
 
     </div>
@@ -456,7 +456,7 @@
       </div>
       <div class="decision-row">
         <span class="decision-num">4</span>
-        <span class="decision-text"><b>KAM ما تلقاش :</b> القيمة القديمة كتبقى (حالة 10 فـ الفوق) — تصحيح دار فـ الكود.</span>
+        <span class="decision-text"><b>KAM ما تلقاش :</b> ديما كيتكتب '#' (حالة 10 فـ الفوق)، حتى لو كانت الخانة فيها قيمة أخرى قبل.</span>
       </div>
     </div>
   </section>

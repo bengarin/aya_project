@@ -218,13 +218,13 @@ class TestAutresRegles(BaseCase):
         self.assertEqual(self.cell(ws, L_RAC, "ID Promoter"), "IDRAC400")
         self.assertEqual(self.cell(ws, L_RAC, "KAM"), "KAM Z")
 
-    def test_kam_non_trouve_garde_ancienne_valeur(self):
+    def test_kam_non_trouve_ecrit_le_marqueur(self):
         plan, _ = self.run_pipeline()
         ws = self.sheet()
         self.assertEqual(plan.stats.kam_non_trouves, 1)
-        # decision utilisateur : on ne devine rien, mais on ne vide pas non plus
-        # une valeur deja presente dans le fichier 2.
-        self.assertEqual(self.cell(ws, L_SANS_KAM, "KAM"), "ANCIEN KAM NOKAM")
+        # decision utilisateur : on ne devine rien, on ecrit le marqueur "#"
+        # (meme si une autre valeur etait deja presente dans le fichier 2).
+        self.assertEqual(self.cell(ws, L_SANS_KAM, "KAM"), "#")
 
     def test_ligne_sans_correspondance_ignoree(self):
         plan, _ = self.run_pipeline()
@@ -251,7 +251,7 @@ class TestAutresRegles(BaseCase):
     def test_statistiques_exactes(self):
         plan, _ = self.run_pipeline()
         attendu = {
-            "Lignes analysees": 12, "Lignes modifiees": 4, "Lignes deja conformes": 2,
+            "Lignes analysees": 12, "Lignes modifiees": 5, "Lignes deja conformes": 1,
             "Lignes ajoutees": 1, "Lignes Store vide": 1, "Stores non trouves": 1,
             "KAM trouves": 6, "KAM non trouves": 1, "Duplicates evites": 1, "A verifier": 4,
         }
