@@ -315,10 +315,10 @@
   </section>
 
   <section>
-    <h2>10 حالات، بالداتا الحقيقية ديال شهر أوت</h2>
+    <h2>12 حالة، بالداتا الحقيقية ديال شهر أوت</h2>
     <p class="section-note">
       كل كارت = حالة وحدة اللي البرنامج كيقابلها فعلاً فـ الملف ديالك، شنو دخل ليه وشنو خرج ليه، وعلاش.
-      غير الحالة 1 (Store vide) ما عندهاش مثال حقيقي هاد الشهر — الملف ديال أوت ما فيهش حتى سطر بـ Store خاوي.
+      غير الحالة 1 (Store vide) والحالات 11-12 ما عندهمش مثال حقيقي هاد الشهر (الملف ما فيهش سطر بـ Store خاوي ولا formules).
     </p>
 
     <div class="case-grid">
@@ -414,16 +414,19 @@
       </div>
 
       <div class="case-card">
-        <div class="case-head"><span class="case-num">09</span><span class="case-title">Store Code مكرر فـ Reference</span><span class="pill amber">À VÉRIFIER</span></div>
+        <div class="case-head"><span class="case-num">09</span><span class="case-title">Store Code مكرر فـ Reference</span><span class="pill blue">MODIFIÉE + ALERTE</span></div>
         <div class="flow-row">
           <div class="flow-col">
             <div class="chip src"><small>Reference</small>Ashiama Aeria mall · VD<br>Store Code = C038841579</div>
             <div class="chip src"><small>Reference</small>Ashiama Panoramique · VD+DA<br>Store Code = C038841579 (نفسو)</div>
           </div>
           <svg class="arrow-icon" width="22" height="14" viewBox="0 0 22 14"><path d="M0 7 H18 M12 1 L18 7 L12 13" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-          <div class="chip warn"><small>نفس المفتاح C038841579VD</small>غير سطر وحد كيتبدل<br>الثاني: duplicate évité</div>
+          <div class="flow-col">
+            <div class="chip vd"><small>ligne 68 · Aeria mall</small>LAKHDAR MOHAMED ✓</div>
+            <div class="chip vd"><small>ligne 25 · Panoramique</small>BEN HAMMOU YOUNESS ✓</div>
+          </div>
         </div>
-        <p class="case-note">جوج stores مختلفين بنفس Code فـ Reference = نفس المفتاح. كيتبدل الأول اللي كيتلاقى، الثاني كيتسجل ما تزادش ليه ليه duplicate.</p>
+        <p class="case-note">البرنامج كيقلب على السطر <b>بالاسم ديال Store</b> أولاً → كل واحد كياخد الداتا ديالو هو. ولكن حيت Reference عطاتهم نفس Code، الجوج غادي يكون عندهم نفس Column1 → كيتسجل تنبيه "À vérifier".</p>
       </div>
 
       <div class="case-card">
@@ -434,6 +437,26 @@
           <div class="chip warn"><small>نتيجة</small>KAM = <b>'#'</b></div>
         </div>
         <p class="case-note">ما كيخترعش KAM، وما كيخليش أي قيمة قديمة (حتى لو كانت شي حاجة أخرى) : ديما '#'، سطر موجود ولا سطر جديد بحال بحال.</p>
+      </div>
+
+      <div class="case-card">
+        <div class="case-head"><span class="case-num">11</span><span class="case-title">خانة فيها formule</span><span class="pill green">ما كتتمسّش</span></div>
+        <div class="flow-row">
+          <div class="chip src"><small>Fichier 2</small>Column1 = <b>=G2&amp;D2</b><br>(formule ماشي نص)</div>
+          <svg class="arrow-icon" width="22" height="14" viewBox="0 0 22 14"><path d="M0 7 H18 M12 1 L18 7 L12 13" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <div class="chip ok"><small>نتيجة</small>الformule كتبقى كيف ما هي<br>Excel كيحسبها بوحدو</div>
+        </div>
+        <p class="case-note">أي خانة فيها <b>=</b> ما كيقربش ليها البرنامج، لا فـ السطور القدام لا فـ الجداد.</p>
+      </div>
+
+      <div class="case-card">
+        <div class="case-head"><span class="case-num">12</span><span class="case-title">السطر الجديد = نسخة من السطر جارو</span><span class="pill teal">CRÉÉE</span></div>
+        <div class="flow-row">
+          <div class="chip src"><small>السطر ديال نفس Code Store</small>Année, Mois, STATUT<br>+ أي عمود آخر + formules</div>
+          <svg class="arrow-icon" width="22" height="14" viewBox="0 0 22 14"><path d="M0 7 H18 M12 1 L18 7 L12 13" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <div class="chip vd"><small>السطر الجديد</small>نسخة كاملة<br>+ داتا Reference فوقها</div>
+        </div>
+        <p class="case-note">الأعمدة اللي Reference ما كتعطيهاش كيتناسخو من السطر جارو (بالformules والتنسيق)، من بعد كتتكتب داتا Reference فوقهم.</p>
       </div>
 
     </div>
