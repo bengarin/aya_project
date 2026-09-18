@@ -155,8 +155,23 @@ ligne), filtres automatiques et mises en forme conditionnelles.
 
 Non conserve (limite d'openpyxl, signale au chargement) : connexions de donnees
 externes / Power Query, tableaux croises dynamiques, graphiques, images, segments,
-parametres d'impression, vues de feuille nommees. Les resultats des formules sont
-recalcules par Excel a l'ouverture.
+parametres d'impression, vues de feuille nommees.
+
+### Le fichier s'ouvre sans message de reparation
+Excel affiche "Excel a pu ouvrir le fichier en supprimant ou en reparant le contenu
+illisible" des qu'une partie du classeur est annoncee mais absente. Trois mesures
+l'evitent :
+
+1. **Tableau Power Query** : dans le fichier d'origine, le tableau de la feuille
+   traitee est un tableau de requete. La requete n'etant pas recopiable, le tableau
+   est converti en **tableau Excel normal** (meme plage, meme style, memes filtres) ;
+   sans cela Excel supprimait le tableau a chaque ouverture.
+2. **Resultats des formules** : ils sont relus dans le fichier d'origine et remis
+   dans le resultat (15 800 environ sur le fichier d'aout), et le classeur est marque
+   "recalculer a l'ouverture" pour qu'Excel rafraichisse ce qui depend des corrections.
+3. **Verification finale** : apres l'enregistrement, le logiciel controle lui-meme le
+   fichier (liens, tableaux, references externes, parties annoncees) et signale tout
+   defaut dans le rapport avant meme que le fichier soit ouvert.
 
 ---
 
@@ -172,7 +187,7 @@ kam_service.py     recherche du KAM par Store + Division
 processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
 excel_writer.py    application du plan, ecriture d'un nouveau fichier
 logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
-tests/             fixtures Excel + 28 tests automatiques
+tests/             fixtures Excel + 32 tests automatiques
 ```
 
 ---
@@ -183,14 +198,15 @@ tests/             fixtures Excel + 28 tests automatiques
 python -m unittest discover -s tests -v
 ```
 
-28 tests, dont les **10 cas obligatoires** :
+32 tests, dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
 Plus : RAC non traite, KAM vide si introuvable, colonnes jamais touchees, statistiques
 exactes, rapport explicatif, sources non modifiees, mise en forme conservee,
 detection par position quand les en-tetes sont illisibles, reconnaissance de la
-ligne par le nom du Store, formules jamais ecrasees, copie complete de la ligne soeur.
+ligne par le nom du Store, formules jamais ecrasees, copie complete de la ligne soeur,
+fichier resultat sans reference cassee (aucun message de reparation d'Excel).
 
 ---
 

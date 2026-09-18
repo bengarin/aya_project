@@ -392,3 +392,81 @@ class TestCorrectionsRecentes(BaseCase):
         self.assertEqual(self.cell(ws2, L_CREEE, "Column1"), "C200DA")       # ligne bien creee
         self.assertEqual(ws2.cell(L_CREEE, 15).value, "note du mois")        # colonne O dupliquee
         self.assertEqual(ws2.cell(L_CREEE, COL["IDAYA"]).value, "=ROW()-1")  # formule dupliquee
+
+
+class TestFichierOuvrableParExcel(BaseCase):
+    """Le fichier produit ne doit jamais declencher la reparation d'Excel."""
+
+    def _injecter(self, table_de_requete: bool, valeur_calculee: bool) -> Path:
+        """Fabrique un fichier 2 realiste : tableau Power Query + formule avec resultat."""
+        import re
+        import zipfile
+
+        source = Path(self.files["target"])
+        with zipfile.ZipFile(source) as archive:
+            ordre = archive.namelist()
+            parties = {nom: archive.read(nom) for nom in ordre}
+
+        if table_de_requete:
+            for nom in [n for n in ordre if n.startswith("xl/tables/")]:
+                parties[nom] = parties[nom].replace(b"<table ", b'<table tableType="queryTable" ', 1)
+
+        if valeur_calculee:
+            for nom in [n for n in ordre if n.startswith("xl/worksheets/sheet")]:
+                xml = parties[nom]
+                # on transforme la cellule A2 en formule AVEC son resultat en cache
+                remplace, nombre = re.subn(rb'<c r="A2"[^>]*>.*?</c>',
+                                           b'<c r="A2"><f>1+1</f><v>2</v></c>', xml, count=1)
+                if nombre:
+                    parties[nom] = remplace
+                    break
+
+        cible = self.folder / "BDD_REALISTE.xlsx"
+        with zipfile.ZipFile(cible, "w", zipfile.ZIP_DEFLATED) as archive:
+            for nom in ordre:
+                archive.writestr(nom, parties[nom])
+        return cible
+
+    def test_aucune_reference_cassee_dans_le_resultat(self):
+        from excel_writer import verifier_fichier
+
+        target = self._injecter(table_de_requete=True, valeur_calculee=False)
+        self.run_pipeline(target=target)
+        self.assertEqual(verifier_fichier(self.output), [],
+                         "le fichier resultat contient une reference cassee : Excel demanderait a le reparer")
+
+    def test_tableau_power_query_converti_en_tableau_normal(self):
+        target = self._injecter(table_de_requete=True, valeur_calculee=False)
+        _, result = self.run_pipeline(target=target)
+        ws = self.sheet()
+        table = list(ws.tables.values())[0]
+        self.assertIsNone(table.tableType, "le tableau doit devenir un tableau Excel normal")
+        self.assertEqual(table.ref, f"A1:N{L_CREEE}")          # plage toujours correcte
+        self.assertTrue(any("Power Query" in w for w in result.warnings))
+
+    def test_resultats_des_formules_conserves(self):
+        target = self._injecter(table_de_requete=False, valeur_calculee=True)
+        self.run_pipeline(target=target)
+        wb = openpyxl.load_workbook(self.output, data_only=True)
+        valeurs = [wb[SHEET].cell(row, 1).value for row in range(2, 4)]
+        wb.close()
+        self.assertIn(2, valeurs, "le resultat de la formule doit etre recopie depuis le fichier d'origine")
+        wb = openpyxl.load_workbook(self.output)
+        self.assertTrue(wb.calculation.fullCalcOnLoad, "Excel doit recalculer a l'ouverture")
+        wb.close()
+
+    def test_le_verificateur_detecte_un_fichier_casse(self):
+        from excel_writer import verifier_fichier
+
+        self.run_pipeline()
+        import zipfile
+        casse = self.folder / "CASSE.xlsx"
+        with zipfile.ZipFile(self.output) as source:
+            ordre = source.namelist()
+            parties = {nom: source.read(nom) for nom in ordre}
+        for nom in [n for n in ordre if n.startswith("xl/tables/")]:
+            parties[nom] = parties[nom].replace(b"<table ", b'<table tableType="queryTable" ', 1)
+        with zipfile.ZipFile(casse, "w", zipfile.ZIP_DEFLATED) as archive:
+            for nom in ordre:
+                archive.writestr(nom, parties[nom])
+        self.assertTrue(verifier_fichier(casse), "le verificateur doit signaler le tableau de requete casse")
