@@ -1,0 +1,384 @@
+<title>Logique de Traitement AYA</title>
+<style>
+  :root{
+    --bg:#eef2f1;
+    --surface:#ffffff;
+    --surface-2:#f5f8f7;
+    --ink:#182225;
+    --muted:#5b6b6c;
+    --line:#d7dfdd;
+    --line-strong:#a9b6b4;
+    --accent:#1f7a6c;
+    --accent-ink:#0f3f37;
+    --red:#b3392c;      --red-bg:#fbeae7;
+    --gray:#6b7280;     --gray-bg:#eef0f1;
+    --teal:#1f7a6c;     --teal-bg:#e6f4f0;
+    --blue:#2f6fa8;     --blue-bg:#e8f1f9;
+    --green:#2f7d52;    --green-bg:#e7f6ee;
+    --amber:#b9791a;    --amber-bg:#fbf1de;
+    --font-display:'Sora',system-ui,sans-serif;
+    --font-body:'IBM Plex Sans',system-ui,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'Courier New',monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#10161a; --surface:#161e21; --surface-2:#1b2427;
+      --ink:#e6edec; --muted:#93a3a2; --line:#2a3336; --line-strong:#3c4749;
+      --accent:#4fd6bd; --accent-ink:#bdf3e6;
+      --red:#ff7a67;   --red-bg:#3a1e1a;
+      --gray:#9aa3a8;  --gray-bg:#232b2e;
+      --teal:#4fd6bd;  --teal-bg:#123330;
+      --blue:#7db8ea;  --blue-bg:#152838;
+      --green:#79dba1; --green-bg:#123326;
+      --amber:#f0ab52; --amber-bg:#3a2c14;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#10161a; --surface:#161e21; --surface-2:#1b2427;
+    --ink:#e6edec; --muted:#93a3a2; --line:#2a3336; --line-strong:#3c4749;
+    --accent:#4fd6bd; --accent-ink:#bdf3e6;
+    --red:#ff7a67;   --red-bg:#3a1e1a;
+    --gray:#9aa3a8;  --gray-bg:#232b2e;
+    --teal:#4fd6bd;  --teal-bg:#123330;
+    --blue:#7db8ea;  --blue-bg:#152838;
+    --green:#79dba1; --green-bg:#123326;
+    --amber:#f0ab52; --amber-bg:#3a2c14;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:var(--font-body);
+    padding-inline:16px; padding-block:28px;
+  }
+  .page{max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:28px;}
+
+  h1,h2,h3{font-family:var(--font-display); text-wrap:balance; margin:0; color:var(--ink);}
+  h1{font-size:clamp(24px,5vw,32px); font-weight:700; letter-spacing:-0.01em;}
+  h2{font-size:19px; font-weight:600; margin-bottom:10px;}
+  p{line-height:1.6; margin:0;}
+  .lede{color:var(--muted); font-size:15px; max-width:62ch;}
+
+  header{display:flex; flex-direction:column; gap:8px;}
+  .eyebrow{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent-ink); background:var(--teal-bg); display:inline-block;
+    padding:4px 9px; border-radius:5px; width:fit-content;
+  }
+
+  .colstrip{display:flex; flex-wrap:wrap; gap:8px;}
+  .colchip{
+    font-family:var(--font-mono); font-size:12px; font-weight:500;
+    border:1px solid var(--line-strong); background:var(--surface-2); color:var(--muted);
+    padding:5px 10px; border-radius:6px;
+  }
+  .colchip b{color:var(--ink); font-weight:600;}
+
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.04);
+  }
+
+  .legend{display:flex; flex-wrap:wrap; gap:14px; margin:12px 0 18px; padding:12px 14px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:10px;}
+  .legend-item{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted);}
+  .dot{width:10px; height:10px; border-radius:50%; flex:none;}
+
+  .flow-scroll{overflow-x:auto; border-radius:10px;}
+  svg.flow{display:block; width:720px; max-width:none; height:auto; margin:0 auto;}
+  svg.flow text{font-family:var(--font-body); font-size:13.5px; fill:var(--ink);}
+  svg.flow text.d{font-size:13.5px; font-weight:600;}
+  svg.flow text.tag{font-family:var(--font-mono); font-size:11px;}
+  figure{margin:0;}
+  figcaption{font-size:13px; color:var(--muted); margin-top:12px; line-height:1.55; max-width:62ch;}
+
+  .examples{display:flex; flex-direction:column; gap:16px;}
+  .example-card{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px;
+    display:flex; flex-direction:column; gap:12px;
+  }
+  .example-title{font-family:var(--font-display); font-weight:600; font-size:15px;}
+  .example-note{font-size:12.5px; color:var(--muted);}
+  .flow-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .flow-col{display:flex; flex-direction:column; gap:10px;}
+  .chip{
+    font-family:var(--font-mono); font-size:12.5px; font-variant-numeric:tabular-nums;
+    background:var(--surface-2); border:1px solid var(--line-strong); border-radius:8px;
+    padding:9px 12px; line-height:1.5; min-width:210px;
+  }
+  .chip.src{border-left:4px solid var(--muted);}
+  .chip.vd{border-left:4px solid var(--blue); background:var(--blue-bg);}
+  .chip.da{border-left:4px solid var(--amber); background:var(--amber-bg);}
+  .chip small{display:block; color:var(--muted); font-family:var(--font-body); font-size:10.5px;
+    text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;}
+  .arrow-icon{flex:none; color:var(--muted);}
+  @media (max-width:560px){
+    .flow-row{flex-direction:column; align-items:stretch;}
+    .arrow-icon{transform:rotate(90deg); align-self:center;}
+    .chip{min-width:0;}
+  }
+
+  .questions{display:flex; flex-direction:column; gap:14px;}
+  .q-card{
+    background:var(--surface); border:1px solid var(--line); border-left:4px solid var(--accent);
+    border-radius:10px; padding:16px 18px; display:flex; flex-direction:column; gap:8px;
+  }
+  .q-head{display:flex; align-items:baseline; gap:9px;}
+  .q-num{font-family:var(--font-mono); font-weight:600; color:var(--accent-ink); background:var(--teal-bg);
+    border-radius:5px; padding:2px 7px; font-size:12px;}
+  .q-title{font-family:var(--font-display); font-weight:600; font-size:15.5px;}
+  .q-example{font-size:13px; color:var(--muted); background:var(--surface-2); border-radius:8px;
+    padding:9px 11px; font-family:var(--font-mono);}
+  .q-options{display:flex; flex-wrap:wrap; gap:8px; margin-top:2px;}
+  .opt{font-size:12.5px; border:1px solid var(--line-strong); border-radius:999px; padding:5px 12px;
+    color:var(--ink); background:var(--surface-2);}
+  .opt b{font-family:var(--font-mono); color:var(--accent-ink);}
+
+  footer{font-size:12.5px; color:var(--muted); border-top:1px solid var(--line); padding-top:16px;
+    line-height:1.6;}
+</style>
+
+<div class="page">
+
+  <header>
+    <span class="eyebrow">AYA · BDD PROMOTERS MONTH</span>
+    <h1>Logique de traitement, sطر بسطر</h1>
+    <p class="lede">
+      هادشي هو باللي فهمت من الصور ديالك — chma كيبين الطريق اللي كيمشي فيها كل سطر
+      من الفيشي 2، من التحقق ديال Store حتى للـ KAM. شوفو بشوية، وفـ الأسفل كاينين
+      3 قرارات باقي خاصني الجواب ديالكم قبل ما نبدل الكود.
+    </p>
+  </header>
+
+  <div class="colstrip">
+    <span class="colchip"><b>Fichier 1</b> STORE · ID Promoter · Store Code · PROMOTER · Divisions · Working Days</span>
+    <span class="colchip"><b>Fichier 2</b> Store · Code Store · Division1 · KAM · DAY · Column1</span>
+    <span class="colchip"><b>Fichier 3</b> feuille VD / feuille DA → Store + KAM</span>
+  </div>
+
+  <section class="card flow-card">
+    <h2>الطريق ديال سطر وحد</h2>
+
+    <div class="legend">
+      <span class="legend-item"><span class="dot" style="background:var(--red)"></span>Store vide → stop</span>
+      <span class="legend-item"><span class="dot" style="background:var(--gray)"></span>غير موجود → signalé</span>
+      <span class="legend-item"><span class="dot" style="background:var(--teal)"></span>VD+DA → 2 affectations</span>
+      <span class="legend-item"><span class="dot" style="background:var(--blue)"></span>Modifier / Créer</span>
+      <span class="legend-item"><span class="dot" style="background:var(--green)"></span>KAM trouvé</span>
+      <span class="legend-item"><span class="dot" style="background:var(--amber)"></span>KAM manquant</span>
+    </div>
+
+    <div class="flow-scroll">
+      <figure>
+        <svg class="flow" viewBox="0 0 720 1380" role="img"
+             aria-label="Organigramme : Store vide colore la ligne en rouge et arrete tout ; sinon on cherche le Store dans la Reference, on lit ses Divisions (VD, DA ou VD+DA traitees comme deux affectations separees), on modifie ou cree la ligne selon que la cle existe deja, puis on cherche le KAM par Store et Division dans le fichier 3.">
+          <defs>
+            <marker id="a-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"/>
+            </marker>
+            <marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--red)"/>
+            </marker>
+            <marker id="a-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--gray)"/>
+            </marker>
+            <marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--teal)"/>
+            </marker>
+            <marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--blue)"/>
+            </marker>
+            <marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--green)"/>
+            </marker>
+            <marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--amber)"/>
+            </marker>
+          </defs>
+
+          <!-- N1 -->
+          <rect x="60" y="24" width="300" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="54" text-anchor="middle">Ligne du Fichier 2</text>
+          <line x1="210" y1="76" x2="210" y2="110" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N2 diamond : Store vide -->
+          <polygon points="210,112 330,152 210,192 90,152" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="156" text-anchor="middle" class="d">Store vide ?</text>
+          <line x1="330" y1="152" x2="418" y2="152" stroke="var(--red)" stroke-width="2.2" marker-end="url(#a-red)"/>
+          <text x="345" y="142" class="tag" fill="var(--red)">oui</text>
+          <rect x="420" y="126" width="270" height="52" rx="9" fill="var(--red-bg)" stroke="var(--red)"/>
+          <text x="555" y="156" text-anchor="middle" fill="var(--red)" font-weight="600">ROUGE — stop, rien d’autre</text>
+          <line x1="210" y1="192" x2="210" y2="226" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+          <text x="222" y="214" class="tag" fill="var(--muted)">non</text>
+
+          <!-- N3 -->
+          <rect x="60" y="228" width="300" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="258" text-anchor="middle">Chercher STORE dans Reference</text>
+          <line x1="210" y1="280" x2="210" y2="314" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N4 diamond : trouvé -->
+          <polygon points="210,316 330,356 210,396 90,356" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="360" text-anchor="middle" class="d">Store trouvé ?</text>
+          <line x1="330" y1="356" x2="418" y2="356" stroke="var(--gray)" stroke-width="2.2" marker-end="url(#a-gray)"/>
+          <text x="345" y="346" class="tag" fill="var(--gray)">non</text>
+          <rect x="420" y="330" width="270" height="52" rx="9" fill="var(--gray-bg)" stroke="var(--gray)"/>
+          <text x="555" y="352" text-anchor="middle" fill="var(--gray)" font-weight="600">Signalé —</text>
+          <text x="555" y="368" text-anchor="middle" fill="var(--gray)" font-weight="600">ligne intacte</text>
+          <line x1="210" y1="396" x2="210" y2="430" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+          <text x="222" y="418" class="tag" fill="var(--muted)">oui</text>
+
+          <!-- N5 -->
+          <rect x="60" y="432" width="300" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="462" text-anchor="middle">Lire Divisions (VD / DA / VD+DA)</text>
+          <line x1="210" y1="484" x2="210" y2="518" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N6 diamond : VD+DA -->
+          <polygon points="210,520 330,560 210,600 90,560" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="564" text-anchor="middle" class="d">= VD+DA ?</text>
+          <line x1="330" y1="560" x2="418" y2="560" stroke="var(--teal)" stroke-width="2.2" marker-end="url(#a-teal)"/>
+          <text x="345" y="550" class="tag" fill="var(--teal)">oui</text>
+          <rect x="420" y="534" width="270" height="52" rx="9" fill="var(--teal-bg)" stroke="var(--teal)"/>
+          <text x="555" y="556" text-anchor="middle" fill="var(--accent-ink)" font-weight="600">2 affectations :</text>
+          <text x="555" y="572" text-anchor="middle" fill="var(--accent-ink)" font-weight="600">VD et DA à part</text>
+          <polyline points="555,586 555,616 210,616 210,634" fill="none" stroke="var(--teal)" stroke-width="2.2" marker-end="url(#a-teal)"/>
+          <line x1="210" y1="600" x2="210" y2="634" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+          <text x="222" y="622" class="tag" fill="var(--muted)">1 seule division</text>
+
+          <!-- N7 merge -->
+          <rect x="60" y="636" width="300" height="48" rx="9" fill="var(--surface)" stroke="var(--line)" stroke-dasharray="4 3"/>
+          <text x="210" y="664" text-anchor="middle" fill="var(--muted)">→ pour chaque division à traiter</text>
+          <line x1="210" y1="684" x2="210" y2="718" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N8 -->
+          <rect x="60" y="720" width="300" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="750" text-anchor="middle">Copier les infos (Reference)</text>
+          <line x1="210" y1="772" x2="210" y2="806" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N9 diamond : clé existe -->
+          <polygon points="210,808 330,848 210,888 90,848" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="844" text-anchor="middle" class="d">Clé Store+Div</text>
+          <text x="210" y="860" text-anchor="middle" class="d">déjà dans F2 ?</text>
+          <line x1="330" y1="848" x2="418" y2="848" stroke="var(--blue)" stroke-width="2.2" marker-end="url(#a-blue)"/>
+          <text x="345" y="838" class="tag" fill="var(--blue)">oui</text>
+          <rect x="420" y="822" width="270" height="52" rx="9" fill="var(--blue-bg)" stroke="var(--blue)"/>
+          <text x="555" y="852" text-anchor="middle" fill="var(--blue)" font-weight="600">Modifier la ligne</text>
+          <line x1="210" y1="888" x2="210" y2="922" stroke="var(--blue)" stroke-width="2.2" marker-end="url(#a-blue)"/>
+          <text x="222" y="910" class="tag" fill="var(--blue)">non</text>
+          <rect x="60" y="924" width="300" height="52" rx="9" fill="var(--blue-bg)" stroke="var(--blue)"/>
+          <text x="210" y="954" text-anchor="middle" fill="var(--blue)" font-weight="600">Créer une ligne</text>
+
+          <polyline points="555,874 555,996 210,996 210,1010" fill="none" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+          <line x1="210" y1="976" x2="210" y2="1010" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N10 -->
+          <rect x="60" y="1012" width="300" height="52" rx="9" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="1036" text-anchor="middle">Chercher KAM</text>
+          <text x="210" y="1052" text-anchor="middle" class="tag" fill="var(--muted)">Store + Division, Fichier 3</text>
+          <line x1="210" y1="1064" x2="210" y2="1098" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N11 diamond : KAM trouvé -->
+          <polygon points="210,1100 330,1140 210,1180 90,1140" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+          <text x="210" y="1144" text-anchor="middle" class="d">KAM trouvé ?</text>
+          <line x1="330" y1="1140" x2="418" y2="1140" stroke="var(--green)" stroke-width="2.2" marker-end="url(#a-green)"/>
+          <text x="345" y="1130" class="tag" fill="var(--green)">oui</text>
+          <rect x="420" y="1114" width="270" height="52" rx="9" fill="var(--green-bg)" stroke="var(--green)"/>
+          <text x="555" y="1144" text-anchor="middle" fill="var(--green)" font-weight="600">Écrire le KAM</text>
+          <line x1="210" y1="1180" x2="210" y2="1214" stroke="var(--amber)" stroke-width="2.2" marker-end="url(#a-amber)"/>
+          <text x="222" y="1202" class="tag" fill="var(--amber)">non</text>
+          <rect x="60" y="1216" width="300" height="52" rx="9" fill="var(--amber-bg)" stroke="var(--amber)"/>
+          <text x="210" y="1246" text-anchor="middle" fill="var(--amber)" font-weight="600">KAM vide, signalé</text>
+
+          <polyline points="555,1166 555,1288 210,1288 210,1302" fill="none" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+          <line x1="210" y1="1268" x2="210" y2="1302" stroke="var(--line-strong)" stroke-width="2.2" marker-end="url(#a-ink)"/>
+
+          <!-- N12 final -->
+          <rect x="60" y="1304" width="300" height="52" rx="9" fill="var(--green-bg)" stroke="var(--green)"/>
+          <text x="210" y="1335" text-anchor="middle" fill="var(--green)" font-weight="700">Ligne terminée ✓</text>
+        </svg>
+        <figcaption>
+          Store vide كيوقف كولشي (رومج برك). ملي Store موجود، كنقلبو عليه فـ Reference، كنشوفو
+          Divisions ديالو (VD+DA = جوج affectations بوحدها)، كل واحدة كنشوفو واش الكلي ديالها
+          (Store+Division) كاينة فـ الفيشي 2 → نبدلوها، ولا خاصنا نزيدو سطر جديد. من بعد كنقلبو
+          على KAM بـ Store+Division فـ الفيشي 3.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="examples">
+    <h2>جوج أمثلة بالداتا الحقيقية ديالك</h2>
+
+    <div class="example-card">
+      <span class="example-title">1 · VD+DA كيتقسم لجوج سطور</span>
+      <div class="flow-row">
+        <div class="chip src">
+          <small>Reference</small>
+          Aswak Assalam Mohammedia · <b>VD+DA</b><br>ROUAK MOULAY HICHAM · 26 j
+        </div>
+        <svg class="arrow-icon" width="26" height="18" viewBox="0 0 26 18"><path d="M0 9 H22 M15 2 L22 9 L15 16" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
+        <div class="flow-col">
+          <div class="chip vd"><small>+ VD</small>Column1 = C000114373<b>VD</b></div>
+          <div class="chip da"><small>+ DA</small>Column1 = C000114373<b>DA</b></div>
+        </div>
+      </div>
+      <span class="example-note">كلا الجوج سطور كيتبناو من نفس السطر ديال Reference (نفس Promoter، نفس 26 يوم).</span>
+    </div>
+
+    <div class="example-card">
+      <span class="example-title">2 · نفس Store، جوج سطور مختلفين فـ Reference</span>
+      <div class="flow-row">
+        <div class="flow-col">
+          <div class="chip src"><small>Reference · VD</small>Aswak Assalam Hay Riad<br>HASBI ABDELLAH · 24 j</div>
+          <div class="chip src"><small>Reference · DA</small>Aswak Assalam Hay Riad<br>BAGHDADI ABDELMOUIJIB · 26 j</div>
+        </div>
+        <svg class="arrow-icon" width="26" height="18" viewBox="0 0 26 18"><path d="M0 9 H22 M15 2 L22 9 L15 16" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>
+        <div class="flow-col">
+          <div class="chip vd"><small>C003470765VD</small>HASBI ABDELLAH · 24 j</div>
+          <div class="chip da"><small>C003470765DA</small>BAGHDADI ABDELMOUIJIB · 26 j</div>
+        </div>
+      </div>
+      <span class="example-note">عمرها ما كتخلط : كل division كتاخد المعلومات ديالها هي بوحدها.</span>
+    </div>
+  </section>
+
+  <section class="questions">
+    <h2>3 قرارات باقي خاصني الجواب ديالهم</h2>
+
+    <div class="q-card">
+      <div class="q-head"><span class="q-num">Q1</span><span class="q-title">DAY (Working Days)</span></div>
+      <p>18 سطر فـ الفيشي 2 عندهم DAY مختلف على Reference. مثال حقيقي :</p>
+      <div class="q-example">Carrefour Agadir → DAY فـ الفيشي = 26 &nbsp;|&nbsp; Reference = 11</div>
+      <div class="q-options">
+        <span class="opt"><b>A</b> ديما نكتبو ديال Reference</span>
+        <span class="opt"><b>B</b> غير فـ السطور الجداد</span>
+        <span class="opt"><b>C</b> غير إلا كانت الخانة خاوية</span>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><span class="q-num">Q2</span><span class="q-title">Store Code مكرر</span></div>
+      <p>Ashiama Aeria mall و Ashiama Panoramique عندهم نفس Store Code فـ Reference :</p>
+      <div class="q-example">C038841579 → مستعمل مرتين لجوج stores مختلفين</div>
+      <div class="q-options">
+        <span class="opt"><b>A</b> نخليوه، نقلبو بالاسم ديال Store</span>
+        <span class="opt"><b>B</b> نصحح Store Code فـ Reference</span>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><span class="q-num">Q3</span><span class="q-title">KAM ما تلقاش</span></div>
+      <p>جوج حالات فـ الفيشي 2 ما عندهمش KAM فـ الفيشي 3 :</p>
+      <div class="q-example">Carrefour Ain Sebaa / DA &nbsp;·&nbsp; Gocom Hay Riad / VD</div>
+      <div class="q-options">
+        <span class="opt"><b>A</b> نخليو الخانة خاوية</span>
+        <span class="opt"><b>B</b> نخليو القيمة القديمة</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Gول ليا غير "Q1=A, Q2=B, Q3=A" (ولا شي بديل) وكنبدل الكود بحال ما تفقنا عليه.
+    هاد الصفحة قراءة برك، ما بدلات حتى فيشي.
+  </footer>
+
+</div>
