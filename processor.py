@@ -486,17 +486,20 @@ class Processor:
 
     # ------------------------------------------------------------------
     def _ligne_soeur(self, entry: ReferenceRow) -> TargetRow | None:
-        """Ligne du fichier 2 portant le MEME Code Store (autre division).
+        """Derniere ligne du fichier 2 du MEME Store (a defaut, du meme Code Store).
 
-        Elle sert uniquement a recopier Annee / Mois / STATUT (que la Reference
-        ne contient pas) et a reprendre la mise en forme. Rien d'autre.
+        Elle sert a 2 choses seulement :
+          - la nouvelle ligne en est une copie (Annee, Mois, STATUT, mise en forme),
+          - la nouvelle ligne est inseree juste en dessous, comme "dupliquer la
+            ligne" dans Excel : VD et DA d'un meme Store restent cote a cote.
+        On prend la DERNIERE ligne du Store pour que ses lignes restent groupees.
         """
-        code = build_key(entry.store_code, "")
-        for trow in self.target.rows:
-            if code and build_key(trow.get("Code Store"), "") == code:
-                return trow
         rows = self._rows_by_store.get(norm_store(entry.store), [])
-        return rows[0] if rows else None
+        if rows:
+            return rows[-1]
+        code = build_key(entry.store_code, "")
+        memes = [t for t in self.target.rows if code and build_key(t.get("Code Store"), "") == code]
+        return memes[-1] if memes else None
 
     # ------------------------------------------------------------------
     def _lignes_candidates(self, entries: list[ReferenceRow], division: str, store_key: str) -> list[TargetRow]:

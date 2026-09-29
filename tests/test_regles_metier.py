@@ -34,20 +34,24 @@ COL = {name: index for index, name in enumerate(
     ["Annee", "Mois", "Division", "Division1", "KAM", "ID Promoter", "Code Store",
      "Promoter", "Store", "City", "STATUT", "DAY", "IDAYA", "Column1"], start=1)}
 
-# Lignes du fichier 2 de test (voir tests/make_fixtures.py)
+# Lignes du FICHIER RESULTAT (voir tests/make_fixtures.py pour le fichier d'origine).
+# La seule ligne creee (Store VDDA / DA) est inseree juste SOUS la ligne VD du meme
+# Store (ligne 4), comme "dupliquer la ligne" dans Excel : les lignes d'origine
+# 5 a 13 descendent donc d'une ligne. Le rapport utilise aussi cette numerotation.
 L_VD_EXISTANT = 2
 L_DA_EXISTANT = 3
 L_VDDA_VD = 4
-L_STORE_VIDE = 5
-L_STORE_INCONNU = 6
-L_RAC = 7
-L_CONFLIT = 8
-L_COLUMN1_FAUX = 9
-L_SANS_REFERENCE = 10
-L_SANS_KAM = 11
-L_ALIAS_A = 12
-L_ALIAS_B = 13
-L_CREEE = 14
+L_CREEE = 5
+L_STORE_VIDE = 6
+L_STORE_INCONNU = 7
+L_RAC = 8
+L_CONFLIT = 9
+L_COLUMN1_FAUX = 10
+L_SANS_REFERENCE = 11
+L_SANS_KAM = 12
+L_ALIAS_A = 13
+L_ALIAS_B = 14
+DERNIERE_LIGNE = 14
 
 
 def md5(path: Path) -> str:
@@ -149,7 +153,11 @@ class TestCasObligatoires(BaseCase):
         ws = self.sheet()
         self.assertEqual(plan.stats.lignes_ajoutees, 1)
         self.assertEqual(result.created_rows, 1)
-        self.assertEqual(ws.max_row, L_CREEE)
+        self.assertEqual(ws.max_row, DERNIERE_LIGNE)
+        # "dupliquer la ligne" : la ligne DA creee est juste sous la ligne VD du meme Store
+        self.assertEqual(L_CREEE, L_VDDA_VD + 1)
+        self.assertEqual(self.cell(ws, L_CREEE, "Store"), self.cell(ws, L_VDDA_VD, "Store"))
+        self.assertEqual(self.cell(ws, L_VDDA_VD, "Division1"), "VD")
         self.assertEqual(self.cell(ws, L_CREEE, "Column1"), "C200DA")
         self.assertEqual(self.cell(ws, L_CREEE, "Division1"), "DA")
         self.assertEqual(self.cell(ws, L_CREEE, "ID Promoter"), "IDVDDA200")
@@ -261,7 +269,9 @@ class TestAutresRegles(BaseCase):
     def test_rapport_explique_chaque_ligne(self):
         plan, _ = self.run_pipeline()
         lignes = {d.row for d in plan.logger.decisions if d.row}
-        self.assertEqual(lignes, set(range(2, 14)))          # les 12 lignes du fichier 2
+        self.assertEqual(lignes, set(range(2, DERNIERE_LIGNE + 1)))   # 12 lignes d'origine + 1 creee
+        # la ligne creee porte son numero dans le fichier resultat (+ la note IDAYA vide)
+        self.assertIn(CREEE, [d.decision for d in plan.logger.decisions if d.row == L_CREEE])
         for decision in plan.logger.decisions:
             self.assertTrue(decision.reason.strip(), "chaque decision doit avoir une raison")
         self.assertEqual(len(plan.logger.by_decision(CREEE)), 1)
@@ -315,7 +325,7 @@ class TestFichiers(BaseCase):
         ws = self.sheet()
         self.assertIn("Notes", self.wb.sheetnames)
         self.assertEqual(ws.freeze_panes, "A2")
-        self.assertEqual(list(ws.tables.values())[0].ref, f"A1:N{L_CREEE}")
+        self.assertEqual(list(ws.tables.values())[0].ref, f"A1:N{DERNIERE_LIGNE}")
         self.assertTrue(ws.cell(1, 1).font.b)
         self.assertEqual(ws.cell(L_CREEE, 1).font.name, ws.cell(L_CREEE - 1, 1).font.name)
 
@@ -461,7 +471,7 @@ class TestFichierOuvrableParExcel(BaseCase):
         ws = self.sheet()
         table = list(ws.tables.values())[0]
         self.assertIsNone(table.tableType, "le tableau doit devenir un tableau Excel normal")
-        self.assertEqual(table.ref, f"A1:N{L_CREEE}")          # plage toujours correcte
+        self.assertEqual(table.ref, f"A1:N{DERNIERE_LIGNE}")   # plage toujours correcte
         self.assertTrue(any("Power Query" in w for w in result.warnings))
 
     def test_resultats_des_formules_conserves(self):

@@ -697,6 +697,16 @@ class App:
         _set_state(self.btn_report, bool(reports))
         _set_progress(self.progress, 1.0)
         self._mark_step(3, True)
+        # Les lignes creees ont ete inserees sous leur ligne soeur : le rapport
+        # affiche maintenant les numeros de ligne du FICHIER RESULTAT.
+        if self.session is not None and self.session.plan is not None:
+            filtre = self.active_filter
+            self.rows = self.session.plan.logger.display_rows()
+            self._build_filters()
+            if filtre in self.filter_buttons:
+                self._set_filter(filtre)
+            else:
+                self._refresh_report()
         message = (
             f"Fichier genere :\n{result.output_path}\n\n"
             f"Cellules modifiees : {result.updated_cells}\n"

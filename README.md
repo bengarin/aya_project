@@ -66,7 +66,7 @@ Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
 | 4 | **Meme Store + meme Division avec 2 promoteurs** | **A VERIFIER**. Aucun choix automatique, aucune ligne ecrasee, donnees laissees intactes. |
 | 5 | **Cle de traitement** | `Code Store + Division`. `C003470765VD` et `C003470765DA` sont **deux cles differentes**. Le Store seul ne suffit jamais. |
 | 6 | **Cle presente dans le fichier 2** | La ligne existante est **mise a jour** (jamais de 2e ligne). |
-| 7 | **Cle absente** | Une nouvelle ligne est **creee**. |
+| 7 | **Cle absente** | Une nouvelle ligne est **creee**, **juste sous la ligne du meme Store** (comme "dupliquer la ligne" dans Excel) : pour un `VD+DA` dont seule la ligne DA existe, la ligne VD apparait directement en dessous. |
 | 8 | **KAM** | Recherche par **Store + Division** (feuille VD ou feuille DA). KAM introuvable = colonne ecrite avec le marqueur **`#`** (ligne existante ou creee) + signale. Jamais de KAM copie d'une division a l'autre. |
 | 9 | **Column1** | Toujours recalculee : `Code Store + Division1`, uniquement quand le Code Store et la Division viennent de la Reference. Une ancienne valeur fausse est corrigee. |
 | 10 | **IDAYA** | N'est jamais une cle de duplicate. Les IDAYA existants ne sont jamais modifies. L'option de numerotation ne touche que les lignes **creees**. |
@@ -94,6 +94,16 @@ rattachee : elle est laissee intacte et signalee en `A VERIFIER`.
 
 C'est ce qui permet de corriger une `Column1` erronee (regle 12) sans creer de doublon.
 Si deux magasins differents finissent avec la meme cle, c'est signale en `A VERIFIER`.
+
+### Ou apparait une ligne creee
+La nouvelle ligne est une copie de la derniere ligne du meme Store, inseree juste en
+dessous ; les lignes suivantes descendent d'un cran (hauteurs et lignes masquees
+comprises) et le tableau Excel est agrandi. Les formules des autres feuilles qui
+lisent cette feuille par colonnes entieres (`'BDD PROMOTERS MONTH'!$M:$M`...) ne
+sont pas affectees. Si quelque chose depend de numeros de ligne precis (formule
+`A2:A80`, mise en forme conditionnelle, liste deroulante, cellules fusionnees),
+la ligne est ajoutee a la fin du tableau et le rapport explique pourquoi.
+Le rapport donne les numeros de ligne **du fichier resultat**.
 
 ### Cellules calculees
 Une cellule qui contient une **formule** n'est jamais ecrasee : elle se recalcule

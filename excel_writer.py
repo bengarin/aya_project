@@ -146,50 +146,17 @@ def apply_plan(
         result.colored_rows += 1
 
     # ------------------------------------------------------------------
-    # 3. Creation des nouvelles lignes (a la fin du tableau)
+    # 3. Creation des nouvelles lignes
+    #    Comme "dupliquer la ligne" dans Excel : la nouvelle ligne est inseree
+    #    JUSTE SOUS la ligne du meme Store (VD sous DA, ou DA sous VD).
     # ------------------------------------------------------------------
     if plan.creations:
-        start_row = layout.last_data_row + 1
-        count = len(plan.creations)
-
-        # Si la zone d'ecriture n'est pas vide, on insere des lignes pour ne rien ecraser.
-        occupied = any(
-            ws.cell(r, c).value not in (None, "")
-            for r in range(start_row, start_row + count)
-            for c in range(first_col, last_col + 1)
-        )
-        if occupied:
-            ws.insert_rows(start_row, amount=count)
-            result.warnings.append(
-                f"{count} ligne(s) inserees en ligne {start_row} : le contenu situe en dessous a ete decale."
-            )
-
-        for offset, creation in enumerate(plan.creations):
-            row = start_row + offset
-            template = creation.template_row or layout.last_data_row
-            # 1. La nouvelle ligne est une COPIE de la ligne soeur : mise en forme,
-            #    valeurs et formules des colonnes qu'on ne remplit pas (demande
-            #    explicite : "les champs que je ne remplis pas -> duplicate").
-            _copy_row_style(ws, template, row, first_col, last_col)
-            _duplicate_row_values(ws, template, row, first_col, last_col)
-            # 2. Puis on ecrit par-dessus ce que la Reference impose, sans jamais
-            #    ecraser une cellule qui contient une formule.
-            for name, col in layout.columns.items():
-                if name not in creation.values:
-                    continue
-                if _is_formula(ws.cell(row, col).value):
-                    log.log(INFO, f"Ligne {row} : formule conservee dans la colonne {name}",
-                            row=row, store=creation.store, division=creation.division)
-                    continue
-                ws.cell(row, col).value = _coerce(creation.values.get(name, ""), name)
-            result.created_rows += 1
-            log.log(
-                INFO,
-                f"Ligne {row} ecrite dans le fichier resultat (cle {creation.values.get('Column1', '')})",
-                row=row, store=creation.store, division=creation.division,
-            )
-
-        _extend_ranges(target, count, log, result)
+        # Les traces Power Query sont retirees d'abord : leurs noms caches ne
+        # doivent pas empecher l'insertion.
+        _neutraliser_tableaux_de_requete(target.workbook, log, result)
+        positions = _ecrire_creations(target, plan, first_col, last_col, log, result)
+        _extend_ranges(target, len(plan.creations), log, result)
+        _renumeroter_rapport(plan, log, positions)
 
     # ------------------------------------------------------------------
     # 4. Nettoyage avant enregistrement (evite le message de reparation d'Excel)
@@ -567,3 +534,167 @@ def verifier_fichier(chemin: str | Path) -> list[str]:
     except Exception as exc:                                    # pragma: no cover
         problemes.append(f"fichier illisible ({exc})")
     return problemes
+
+
+# ---------------------------------------------------------------------------
+# Creation des lignes : sous la ligne soeur, ou a la fin si c'est plus sur
+# ---------------------------------------------------------------------------
+@dataclass
+class _Positions:
+    """Ou se trouvent les lignes apres les insertions (pour le rapport)."""
+
+    insertions: list[tuple[int, int]] = field(default_factory=list)   # (ligne d'origine, nombre insere)
+    nouvelles: dict[str, int] = field(default_factory=dict)            # cle -> ligne finale
+
+    def finale(self, ligne: int) -> int:
+        """Ligne du fichier resultat correspondant a une ligne du fichier d'origine."""
+        return ligne + sum(nombre for point, nombre in self.insertions if point <= ligne)
+
+
+def _insertion_impossible(workbook, ws, premiere_ligne: int) -> str | None:
+    """Dit si inserer des lignes au milieu de la feuille peut casser quelque chose.
+
+    openpyxl deplace les cellules mais ne met pas a jour les references qui
+    pointent vers des numeros de ligne precis. On n'insere donc au milieu que
+    si rien ne depend de ces numeros ; sinon on ajoute a la fin (sans risque).
+    """
+    if list(ws.conditional_formatting):
+        return "la feuille a des mises en forme conditionnelles"
+    if ws.data_validations.dataValidation:
+        return "la feuille a des listes deroulantes (validations)"
+    if ws.merged_cells.ranges:
+        return "la feuille a des cellules fusionnees"
+
+    for cellule in list(getattr(ws, "_cells", {}).values()):
+        if cellule.row >= premiere_ligne and _is_formula(cellule.value):
+            return f"la feuille contient des formules (ex. {cellule.coordinate})"
+
+    nom = ws.title
+    motif = re.compile(r"(?:'" + re.escape(nom.replace("'", "''")) + r"'|\b" + re.escape(nom) + r")!([$A-Z0-9:]+)")
+    for autre in workbook.worksheets:
+        for cellule in list(getattr(autre, "_cells", {}).values()):
+            valeur = cellule.value
+            if not _is_formula(valeur) or nom not in valeur:
+                continue
+            for plage in motif.findall(valeur):
+                if re.search(r"\d", plage):
+                    return f"la formule {autre.title}!{cellule.coordinate} vise des lignes precises ({plage})"
+
+    noms = list(getattr(workbook, "defined_names", {}).items())
+    for feuille in workbook.worksheets:
+        noms += list(getattr(feuille, "defined_names", {}).items())
+    for cle, defini in noms:
+        if str(cle).startswith("_xlnm._FilterDatabase"):
+            continue
+        texte = str(getattr(defini, "attr_text", "") or "")
+        for plage in motif.findall(texte):
+            if re.search(r"\d", plage):
+                return f"le nom defini {cle} vise des lignes precises ({plage})"
+    return None
+
+
+def _decaler_hauteurs(ws, depuis: int, nombre: int) -> None:
+    """Deplace les hauteurs / lignes masquees, qu'openpyxl ne deplace pas tout seul."""
+    a_deplacer = {i: ws.row_dimensions[i] for i in list(ws.row_dimensions.keys()) if i >= depuis}
+    for i in a_deplacer:
+        del ws.row_dimensions[i]
+    for i, dimension in a_deplacer.items():
+        nouvelle = copy(dimension)
+        nouvelle.index = i + nombre
+        ws.row_dimensions[i + nombre] = nouvelle
+
+
+def _remplir_ligne(ws, layout, creation, ligne: int, modele: int, first_col: int, last_col: int,
+                   log: ProcessLogger) -> None:
+    """La nouvelle ligne = copie de la ligne modele, puis les valeurs de la Reference par-dessus."""
+    _copy_row_style(ws, modele, ligne, first_col, last_col)
+    _duplicate_row_values(ws, modele, ligne, first_col, last_col)
+    for nom, col in layout.columns.items():
+        if nom not in creation.values:
+            continue
+        if _is_formula(ws.cell(ligne, col).value):
+            log.log(INFO, f"Ligne {ligne} : formule conservee dans la colonne {nom}",
+                    store=creation.store, division=creation.division)
+            continue
+        ws.cell(ligne, col).value = _coerce(creation.values.get(nom, ""), nom)
+
+
+def _ecrire_creations(target: TargetData, plan: Plan, first_col: int, last_col: int,
+                      log: ProcessLogger, result: WriteResult) -> _Positions:
+    ws, layout = target.worksheet, target.layout
+    positions = _Positions()
+
+    sous_soeur = [c for c in plan.creations if c.template_row]
+    a_la_fin = [c for c in plan.creations if not c.template_row]
+
+    if sous_soeur:
+        premiere = min(c.template_row for c in sous_soeur) + 1
+        raison = _insertion_impossible(target.workbook, ws, premiere)
+        if raison:
+            message = (f"Nouvelles lignes ajoutees a la FIN du tableau (et non sous la ligne du meme Store) : "
+                       f"{raison}. Les inserer au milieu risquerait de casser ces references.")
+            result.warnings.append(message)
+            log.info(message)
+            a_la_fin = sous_soeur + a_la_fin
+            sous_soeur = []
+
+    # 1. Insertions sous la ligne soeur, du BAS vers le HAUT : chaque insertion
+    #    ne decale ainsi que des lignes deja traitees.
+    groupes: dict[int, list] = {}
+    for creation in sous_soeur:
+        groupes.setdefault(creation.template_row + 1, []).append(creation)
+    for point in sorted(groupes, reverse=True):
+        lot = groupes[point]
+        ws.insert_rows(point, amount=len(lot))
+        _decaler_hauteurs(ws, point, len(lot))
+        for decalage, creation in enumerate(lot):
+            _remplir_ligne(ws, layout, creation, point + decalage, point - 1, first_col, last_col, log)
+            result.created_rows += 1
+        positions.insertions.append((point, len(lot)))
+
+    for point in sorted(groupes):
+        for decalage, creation in enumerate(groupes[point]):
+            positions.nouvelles[creation.key] = positions.finale(point - 1) + 1 + decalage
+
+    # 2. Ajouts a la fin du tableau (pas de ligne soeur, ou insertion jugee risquee)
+    if a_la_fin:
+        debut = positions.finale(layout.last_data_row) + 1
+        occupe = any(
+            ws.cell(r, c).value not in (None, "")
+            for r in range(debut, debut + len(a_la_fin))
+            for c in range(first_col, last_col + 1)
+        )
+        if occupe:
+            ws.insert_rows(debut, amount=len(a_la_fin))
+            _decaler_hauteurs(ws, debut, len(a_la_fin))
+            result.warnings.append(
+                f"{len(a_la_fin)} ligne(s) inserees en ligne {debut} : le contenu situe en dessous a ete decale.")
+        for decalage, creation in enumerate(a_la_fin):
+            ligne = debut + decalage
+            modele = positions.finale(creation.template_row) if creation.template_row \
+                else positions.finale(layout.last_data_row)
+            _remplir_ligne(ws, layout, creation, ligne, modele, first_col, last_col, log)
+            positions.nouvelles[creation.key] = ligne
+            result.created_rows += 1
+
+    for creation in plan.creations:
+        ligne = positions.nouvelles.get(creation.key)
+        log.log(INFO, f"Ligne {ligne} creee dans le fichier resultat (cle {creation.key})",
+                row=ligne, store=creation.store, division=creation.division)
+    return positions
+
+
+def _renumeroter_rapport(plan: Plan, log: ProcessLogger, positions: _Positions) -> None:
+    """Apres insertion, le rapport donne les numeros de ligne du FICHIER RESULTAT."""
+    for decision in log.decisions:
+        if decision.row:
+            decision.row = positions.finale(decision.row)
+        elif decision.key in positions.nouvelles and decision.decision in ("CREEE", "A VERIFIER"):
+            decision.row = positions.nouvelles[decision.key]
+    for entree in log.entries:
+        if entree.row and not entree.message.startswith("Ligne "):
+            entree.row = positions.finale(entree.row)
+    for update in plan.updates:
+        update.row = positions.finale(update.row)
+    for mark in plan.marks:
+        mark.row = positions.finale(mark.row)
