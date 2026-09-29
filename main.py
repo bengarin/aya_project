@@ -5,6 +5,7 @@ Point d'entree du logiciel.
 
   python main.py                -> ouvre l'interface graphique
   python main.py --cli ...      -> traitement sans interface (tests, automatisation)
+  python main.py --smoke-test   -> ouvre la fenetre puis la ferme seule (test du paquet .exe)
 
 Le mode --cli fait EXACTEMENT le meme traitement que l'interface.
 """
@@ -12,17 +13,19 @@ Le mode --cli fait EXACTEMENT le meme traitement que l'interface.
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
+import threading
 from pathlib import Path
 
 # Permet de lancer le logiciel depuis n'importe quel dossier.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import app_paths                                             # noqa: E402
 from pipeline import PipelineError, Selection, Session       # noqa: E402
 from processor import Options                                # noqa: E402
-
-APP_NAME = "Automatisation Excel AYA"
-VERSION = "1.0.0"
+from version import APP_NAME, VERSION                        # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-report", action="store_true", help="ne pas generer le rapport a cote du resultat")
     parser.add_argument("--auto-idaya", action="store_true",
                         help="numeroter automatiquement IDAYA sur les lignes CREEES uniquement")
+    parser.add_argument("--smoke-test", action="store_true",
+                        help="ouvrir la fenetre puis la fermer seule (verification du paquet)")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {VERSION}")
     return parser
 
@@ -93,28 +98,72 @@ def run_cli(args) -> int:
         print(f"\nERREUR : {exc}", file=sys.stderr)
         return 2
     except Exception as exc:                                # pragma: no cover
+        logging.exception("Erreur inattendue (mode CLI)")
         print(f"\nERREUR INATTENDUE : {exc}", file=sys.stderr)
+        print(f"Detail : {app_paths.log_dir()}", file=sys.stderr)
         return 3
     finally:
         session.close()
 
 
+def _show_fatal(message: str) -> None:
+    """Message d'erreur visible meme sans console (EXE fenetre)."""
+    print(message, file=sys.stderr)
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
+        except Exception:                                   # pragma: no cover
+            pass
+
+
+def _install_error_hooks() -> None:
+    """Toute erreur non prevue est ecrite dans le journal au lieu de disparaitre."""
+    def hook(exc_type, exc, tb):
+        logging.critical("Erreur non geree", exc_info=(exc_type, exc, tb))
+        if sys.__stderr__ is not None:
+            sys.__excepthook__(exc_type, exc, tb)
+
+    def thread_hook(args):
+        logging.critical("Erreur non geree (thread)",
+                         exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+    sys.excepthook = hook
+    threading.excepthook = thread_hook
+
+
+def _fix_missing_console() -> None:
+    """Dans l'EXE sans console, stdout/stderr valent None : print() planterait."""
+    if sys.stdout is None or sys.stderr is None:
+        devnull = open(os.devnull, "w", encoding="utf-8")
+        sys.stdout = sys.stdout or devnull
+        sys.stderr = sys.stderr or devnull
+
+
 def main(argv: list[str] | None = None) -> int:
+    _fix_missing_console()
+    app_paths.setup_logging()
+    _install_error_hooks()
     args = build_parser().parse_args(argv)
     if args.cli or any([args.reference, args.target, args.kam]):
         return run_cli(args)
     try:
         from gui import launch
     except Exception as exc:                                # pragma: no cover - environnement sans Tkinter
-        print(
+        logging.exception("Interface graphique indisponible")
+        _show_fatal(
             "Impossible de demarrer l'interface graphique : " + str(exc) + "\n\n"
             "Installez Tkinter (Windows/Mac : inclus avec Python ; Linux : 'sudo apt install python3-tk')\n"
             "ou utilisez le mode ligne de commande :\n"
-            "  python main.py --cli -r Reference.xlsx -t BDD.xlsx -k KAM.xlsx -o Resultat.xlsx",
-            file=sys.stderr,
+            "  python main.py --cli -r Reference.xlsx -t BDD.xlsx -k KAM.xlsx -o Resultat.xlsx"
         )
         return 4
-    launch()
+    try:
+        launch(smoke_test_ms=1500 if args.smoke_test else 0)
+    except Exception as exc:                                # pragma: no cover
+        logging.exception("Erreur au demarrage de l'interface")
+        _show_fatal(f"Le logiciel n'a pas pu demarrer :\n{exc}\n\nDetail : {app_paths.log_dir()}")
+        return 5
     return 0
 
 

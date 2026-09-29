@@ -1,0 +1,104 @@
+name: Build Windows
+
+# Construit l'EXE sur un vrai Windows, puis le teste sur une 2e machine
+# ou Python est retire du PATH (= PC utilisateur sans Python).
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md", "logique_schema.html"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Construire (tests + PyInstaller + verification + ZIP + installateur)
+        shell: pwsh
+        run: ./build_windows.ps1 -Python python -PythonVersion "-I"
+
+      - name: Fichiers de test pour la machine propre
+        shell: pwsh
+        run: .venv-build\Scripts\python.exe tests\make_fixtures.py fixtures_ci
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AYA_Excel_Windows
+          path: release/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixtures
+          path: fixtures_ci/*
+
+  test-sans-python:
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: AYA_Excel_Windows
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: fixtures
+
+      - name: Retirer Python de la machine (PATH)
+        shell: pwsh
+        run: |
+          $clean = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'python|Python|pipx' }) -join ';'
+          "PATH=$clean" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Installer (sans admin), lancer, traiter, desinstaller
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (Get-Command python -ErrorAction SilentlyContinue) { throw "Python encore visible" }
+          $setup = Get-ChildItem release\AYA_Excel_Setup_*.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/TASKS=desktopicon" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installation : code $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\AYA Excel"
+          if (-not (Test-Path "$app\AYA_Excel.exe")) { throw "EXE non installe" }
+          if (-not (Test-Path "$env:USERPROFILE\Desktop\Automatisation Excel AYA.lnk")) { throw "Raccourci Bureau absent" }
+
+          $g = Start-Process "$app\AYA_Excel.exe" -ArgumentList "--smoke-test" -PassThru -Wait
+          if ($g.ExitCode -ne 0) { throw "Fenetre : code $($g.ExitCode)" }
+
+          $f = (Resolve-Path fixtures).Path
+          & "$app\AYA_Excel_CLI.exe" --cli -r "$f\TEST_Reference.xlsx" -t "$f\TEST_BDD.xlsx" -k "$f\TEST_KAM.xlsx" -o "$f\RESULTAT.xlsx"
+          if ($LASTEXITCODE -ne 0) { throw "Traitement : code $LASTEXITCODE" }
+          foreach ($x in "RESULTAT.xlsx","RESULTAT_RAPPORT.txt","RESULTAT_RAPPORT.xlsx") {
+            if (-not (Test-Path "$f\$x")) { throw "$x absent" }
+          }
+          if (-not (Test-Path "$env:APPDATA\AYA Excel\config.json")) { throw "config non creee" }
+
+          $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -PassThru -Wait
+          Start-Sleep -Seconds 5
+          if (Test-Path "$app\AYA_Excel.exe") { throw "Desinstallation incomplete" }
+          if (-not (Test-Path "$env:APPDATA\AYA Excel\config.json")) { throw "La desinstallation a supprime la config" }
+          Write-Host "OK : installation, fenetre, traitement, desinstallation"
+
+      - name: ZIP portable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zip = Get-ChildItem release\AYA_Excel_Portable_*.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath portable
+          $g = Start-Process "portable\AYA_Excel\AYA_Excel.exe" -ArgumentList "--smoke-test" -PassThru -Wait
+          if ($g.ExitCode -ne 0) { throw "Portable : code $($g.ExitCode)" }
+          & portable\AYA_Excel\AYA_Excel_CLI.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "Portable CLI : code $LASTEXITCODE" }
+          Write-Host "OK : ZIP portable"

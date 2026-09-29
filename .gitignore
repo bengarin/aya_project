@@ -5,9 +5,14 @@ venv/
 build/
 dist/
 *.spec
+!packaging/aya_excel.spec
+packaging/build/
+packaging/dist/
+release/
 # fichiers de travail Excel
 ~$*.xlsx
 *_TRAITE.xlsx
 *_RAPPORT.xlsx
 *_RAPPORT.txt
 tests/fixtures/
+.venv-build/

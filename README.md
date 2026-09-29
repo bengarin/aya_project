@@ -14,6 +14,12 @@ ecrasement arbitraire, aucun duplicate base uniquement sur le STORE.
 
 ## 1. Installation
 
+**Utilisateur Windows : rien a installer.** Utiliser `AYA_Excel_Setup_<version>.exe`
+(installateur, sans droits admin) ou `AYA_Excel_Portable_<version>.zip`.
+Construction, distribution et mises a jour : voir **[DISTRIBUTION.md](DISTRIBUTION.md)**.
+
+Developpeur (depuis le code source) :
+
 1. Installer **Python 3.10+** : https://www.python.org/downloads/ (Windows : cocher *Add Python to PATH*).
 2. Dans le dossier du logiciel :
 
@@ -209,7 +215,11 @@ kam_service.py     recherche du KAM par Store + Division
 processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
 excel_writer.py    application du plan, ecriture d'un nouveau fichier
 logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
-tests/             fixtures Excel + 35 tests automatiques
+app_paths.py       ou ranger config et journaux (%APPDATA% / %LOCALAPPDATA%)
+version.py         nom + numero de version (lu aussi par le build)
+tests/             fixtures Excel + tests automatiques
+packaging/         recette PyInstaller, installateur Inno Setup, verification de l'EXE
+build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 ```
 
 ---
@@ -220,7 +230,7 @@ tests/             fixtures Excel + 35 tests automatiques
 python -m unittest discover -s tests -v
 ```
 
-35 tests, dont les **10 cas obligatoires** :
+39 tests (35 regles metier + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

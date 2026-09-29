@@ -19,6 +19,7 @@ se fige jamais.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -32,6 +33,7 @@ from tkinter import filedialog, messagebox, ttk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import app_paths                                                # noqa: E402
 from excel_reader import list_sheet_names                       # noqa: E402
 from logger import (                                            # noqa: E402
     A_VERIFIER, CONFORME, CREEE, DUPLICATE, ERREUR, IGNOREE,
@@ -50,7 +52,6 @@ except Exception:                                               # pragma: no cov
 
 APP_TITLE = "AUTOMATISATION EXCEL - AYA"
 AUTO = "(detection automatique)"
-CONFIG_FILE = Path.home() / ".aya_excel.json"
 
 FONT = ("Segoe UI", 11)
 FONT_SMALL = ("Segoe UI", 9)
@@ -189,6 +190,14 @@ class App:
             if "clam" in style.theme_names():
                 style.theme_use("clam")
         self.root.title(APP_TITLE)
+        self.root.report_callback_exception = self._on_tk_error
+        if sys.platform.startswith("win"):
+            icon = app_paths.resource_path("aya.ico")
+            if icon.exists():
+                try:
+                    self.root.iconbitmap(default=str(icon))
+                except Exception:                               # pragma: no cover
+                    pass
         width = min(1180, self.root.winfo_screenwidth() - 60)
         height = min(900, self.root.winfo_screenheight() - 70)
         self.root.geometry(f"{max(width, 960)}x{max(height, 640)}")
@@ -394,7 +403,7 @@ class App:
     # ------------------------------------------------------------------
     def _load_config(self) -> None:
         try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            data = json.loads(app_paths.read_config_text() or "{}")
         except Exception:
             return
         for key, var in (("reference", self.var_ref), ("target", self.var_target),
@@ -409,13 +418,13 @@ class App:
 
     def _save_config(self) -> None:
         try:
-            CONFIG_FILE.write_text(json.dumps({
+            app_paths.write_config_text(json.dumps({
                 "reference": self.var_ref.get(),
                 "target": self.var_target.get(),
                 "kam": self.var_kam.get(),
-            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            }, ensure_ascii=False, indent=2))
         except Exception:                                       # pragma: no cover
-            pass
+            logging.exception("Sauvegarde de la configuration impossible")
 
     # ------------------------------------------------------------------
     # Actions utilisateur
@@ -516,6 +525,7 @@ class App:
         except PipelineError as exc:
             self.queue.put(("error", str(exc)))
         except Exception as exc:                                # pragma: no cover
+            logging.exception("Erreur inattendue pendant le traitement")
             self.queue.put(("error", f"Erreur inattendue :\n{exc}\n\n{traceback.format_exc(limit=3)}"))
 
     # ------------------------------------------------------------------
@@ -546,6 +556,7 @@ class App:
         except PipelineError as exc:
             self.queue.put(("error", str(exc)))
         except Exception as exc:                                # pragma: no cover
+            logging.exception("Erreur inattendue pendant le traitement")
             self.queue.put(("error", f"Erreur inattendue :\n{exc}\n\n{traceback.format_exc(limit=3)}"))
 
     # ------------------------------------------------------------------
@@ -721,6 +732,18 @@ class App:
         messagebox.showinfo("Traitement termine", message)
 
     # ------------------------------------------------------------------
+    def _on_tk_error(self, exc_type, exc, tb) -> None:
+        """Erreur dans un bouton / evenement : on l'affiche au lieu de planter en silence."""
+        logging.error("Erreur interface", exc_info=(exc_type, exc, tb))
+        try:
+            self._set_busy(False)
+        except Exception:                                       # pragma: no cover
+            pass
+        messagebox.showerror(
+            "Erreur", f"Une erreur est survenue :\n{exc}\n\n"
+            f"Detail enregistre dans :\n{app_paths.log_dir()}")
+
+    # ------------------------------------------------------------------
     def _on_close(self) -> None:
         if self.busy and not messagebox.askokcancel("Quitter", "Un traitement est en cours. Quitter quand meme ?"):
             return
@@ -729,12 +752,15 @@ class App:
             self.session.close()
         self.root.destroy()
 
-    def run(self) -> None:
+    def run(self, smoke_test_ms: int = 0) -> None:
+        if smoke_test_ms:
+            # Test automatique du paquet : la fenetre s'ouvre puis se ferme seule.
+            self.root.after(smoke_test_ms, self._on_close)
         self.root.mainloop()
 
 
-def launch() -> None:
-    App().run()
+def launch(smoke_test_ms: int = 0) -> None:
+    App().run(smoke_test_ms)
 
 
 if __name__ == "__main__":

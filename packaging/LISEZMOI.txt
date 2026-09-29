@@ -1,0 +1,35 @@
+AUTOMATISATION EXCEL AYA - version portable
+===========================================
+
+DEMARRER
+  1. Decompressez le ZIP (clic droit > "Extraire tout...") dans un dossier a vous,
+     par exemple  Documents\AYA_Excel
+     (ne lancez pas le logiciel depuis l'interieur du ZIP).
+  2. Double-cliquez sur  AYA_Excel.exe
+  3. Raccourci sur le Bureau (facultatif) :
+     clic droit sur AYA_Excel.exe > "Envoyer vers" > "Bureau (creer un raccourci)"
+
+Rien a installer : ni Python, ni droits administrateur.
+
+PREMIER LANCEMENT
+  Windows peut afficher "Windows a protege votre ordinateur" (SmartScreen),
+  car le logiciel n'est pas signe numeriquement.
+  Cliquez sur "Informations complementaires" puis "Executer quand meme".
+
+VOS DONNEES
+  - Vos fichiers Excel ne sont JAMAIS modifies : le resultat est toujours un
+    NOUVEAU fichier (..._TRAITE.xlsx) + un rapport.
+  - Le logiciel se souvient des 3 derniers fichiers choisis dans :
+        %APPDATA%\AYA Excel\config.json
+  - En cas d'erreur, le detail est ecrit dans :
+        %LOCALAPPDATA%\AYA Excel\logs\aya_excel.log
+    (envoyez ce fichier au support)
+
+METTRE A JOUR
+  Fermez le logiciel, supprimez l'ancien dossier AYA_Excel, decompressez le
+  nouveau ZIP au meme endroit. Vos reglages et vos fichiers Excel ne sont pas touches.
+
+CONTENU DU DOSSIER
+  AYA_Excel.exe       le logiciel (a utiliser)
+  AYA_Excel_CLI.exe   la meme chose en ligne de commande (automatisation, support)
+  _internal\          fichiers du logiciel : ne rien modifier / supprimer
