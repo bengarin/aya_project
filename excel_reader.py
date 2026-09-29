@@ -101,7 +101,7 @@ TARGET_SPEC = SheetSpec(
         "Mois": ("month",),
         "City": ("ville",),
         "STATUT": ("status",),
-        "IDAYA": ("id aya",),
+        "IDAYA": ("id aya", "id"),
     },
     preferred_titles=("BDD PROMOTERS MONTH",),
     positional={"Annee": 1, "Mois": 2, "Division": 3, "Division1": 4, "KAM": 5,

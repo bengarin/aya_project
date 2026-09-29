@@ -193,9 +193,17 @@ class Processor:
         3. la valeur ecrite dans Column1 (N), qui peut etre ancienne ou fausse.
         """
         if store_key and division:
+            libres = [t for t in self._rows_by_store.get(store_key, []) if t.row not in self._used_rows]
+            # 1. meme Store + meme Division1
+            rows = [t for t in libres if norm_division(t.get("Division1")) == division]
+            if rows:
+                return rows
+            # 1b. meme Store + meme Division (colonne C), quand Division1 est vide ou
+            #     illisible : la colonne C dit encore clairement VD ou DA.
             rows = [
-                t for t in self._rows_by_store.get(store_key, [])
-                if t.row not in self._used_rows and norm_division(t.get("Division1")) == division
+                t for t in libres
+                if norm_division(t.get("Division1")) not in DIVISIONS_TRAITEES
+                and norm_division(t.get("Division")) == division
             ]
             if rows:
                 return rows
@@ -529,6 +537,19 @@ class Processor:
         """Lignes du fichier 2 sans decision : aucune affectation correspondante."""
         for trow in self.target.rows:
             if trow.row in self._decided_rows:
+                continue
+            division1 = norm_division(trow.get("Division1"))
+            division = norm_division(trow.get("Division"))
+            if division1 not in DIVISIONS_TRAITEES and division not in DIVISIONS_TRAITEES:
+                # Ni Division1 ni Division ne disent VD ou DA : la ligne ne peut pas
+                # etre rattachee a une affectation. On ne devine pas, on signale.
+                self._verifier(
+                    trow.get("Store"), trow.get("Division1"), "",
+                    f"Division1 ('{trow.get('Division1')}') et Division ('{trow.get('Division')}') "
+                    "ne valent ni VD ni DA : impossible de savoir a quelle affectation rattacher "
+                    "cette ligne. Ligne laissee intacte, a corriger a la main.",
+                    rows=[trow.row],
+                )
                 continue
             self._decide(
                 IGNOREE, trow.row, store=trow.get("Store"), division=trow.get("Division1"),

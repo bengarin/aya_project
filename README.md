@@ -83,8 +83,14 @@ Dans cet ordre de confiance :
 1. **`Store (I)` + `Division1 (D)`** — le nom du magasin est ce qui l'identifie vraiment
    (c'est ainsi qu'on le cherche dans la Reference). Indispensable quand deux magasins
    partagent le meme `Store Code` dans la Reference : chacun retrouve **sa** ligne ;
-2. `Code Store (G) + Division1 (D)` — la cle metier reconstruite ;
-3. la valeur ecrite dans `Column1 (N)` — qui peut etre ancienne ou fausse.
+2. **`Store (I)` + `Division (C)`**, quand `Division1` est vide ou abimee et que la
+   colonne C dit clairement `VD` ou `DA` : la ligne est corrigee **sur place**
+   (au lieu d'etre ignoree et remplacee par une nouvelle ligne en double) ;
+3. `Code Store (G) + Division1 (D)` — la cle metier reconstruite ;
+4. la valeur ecrite dans `Column1 (N)` — qui peut etre ancienne ou fausse.
+
+Une ligne dont ni `Division1` ni `Division` ne valent `VD` ou `DA` ne peut pas etre
+rattachee : elle est laissee intacte et signalee en `A VERIFIER`.
 
 C'est ce qui permet de corriger une `Column1` erronee (regle 12) sans creer de doublon.
 Si deux magasins differents finissent avec la meme cle, c'est signale en `A VERIFIER`.
@@ -162,10 +168,16 @@ Excel affiche "Excel a pu ouvrir le fichier en supprimant ou en reparant le cont
 illisible" des qu'une partie du classeur est annoncee mais absente. Trois mesures
 l'evitent :
 
-1. **Tableau Power Query** : dans le fichier d'origine, le tableau de la feuille
-   traitee est un tableau de requete. La requete n'etant pas recopiable, le tableau
-   est converti en **tableau Excel normal** (meme plage, meme style, memes filtres) ;
-   sans cela Excel supprimait le tableau a chaque ouverture.
+1. **Traces Power Query** : dans le fichier d'origine, le tableau de la feuille
+   traitee est un tableau de requete. La requete n'etant pas recopiable, le logiciel
+   retire les 3 traces qui pointaient vers elle :
+   - l'etiquette "tableau de requete" du tableau,
+   - le lien de chaque colonne vers un champ de la requete (`queryTableFieldId`),
+     cause de *"Enregistrements supprimes : Tableau dans /xl/tables/table3.xml"*,
+   - les noms caches `ExternalData_1, _2...` (zones remplies par les requetes),
+     cause de *"Partie supprimee : Plage de donnees externes"*.
+
+   Le tableau devient un **tableau Excel normal** (meme plage, meme style, memes filtres).
 2. **Resultats des formules** : ils sont relus dans le fichier d'origine et remis
    dans le resultat (15 800 environ sur le fichier d'aout), et le classeur est marque
    "recalculer a l'ouverture" pour qu'Excel rafraichisse ce qui depend des corrections.
@@ -187,7 +199,7 @@ kam_service.py     recherche du KAM par Store + Division
 processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
 excel_writer.py    application du plan, ecriture d'un nouveau fichier
 logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
-tests/             fixtures Excel + 32 tests automatiques
+tests/             fixtures Excel + 35 tests automatiques
 ```
 
 ---
@@ -198,7 +210,7 @@ tests/             fixtures Excel + 32 tests automatiques
 python -m unittest discover -s tests -v
 ```
 
-32 tests, dont les **10 cas obligatoires** :
+35 tests, dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
@@ -206,7 +218,8 @@ Plus : RAC non traite, KAM vide si introuvable, colonnes jamais touchees, statis
 exactes, rapport explicatif, sources non modifiees, mise en forme conservee,
 detection par position quand les en-tetes sont illisibles, reconnaissance de la
 ligne par le nom du Store, formules jamais ecrasees, copie complete de la ligne soeur,
-fichier resultat sans reference cassee (aucun message de reparation d'Excel).
+fichier resultat sans reference cassee (aucun message de reparation d'Excel),
+lignes abimees corrigees sur place grace a la colonne Division.
 
 ---
 

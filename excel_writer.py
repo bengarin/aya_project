@@ -358,28 +358,63 @@ def _restaurer_valeurs_calculees(sortie: Path, valeurs: dict[str, dict[bytes, tu
 
 
 def _neutraliser_tableaux_de_requete(workbook, log: ProcessLogger, result: WriteResult) -> None:
-    """Transforme les tableaux "Power Query" en tableaux Excel normaux.
+    """Enleve du classeur TOUTES les traces de Power Query qu'openpyxl ne recopie pas.
 
-    Pourquoi : dans le fichier d'origine, le tableau de la feuille traitee est
-    declare comme un tableau de requete (tableType="queryTable") relie a une
-    connexion Power Query. openpyxl ne sait pas recopier la requete elle-meme ;
-    si on gardait l'etiquette "tableau de requete", Excel trouverait un tableau
-    qui pointe vers une requete disparue et afficherait, a chaque ouverture :
-    "Excel a pu ouvrir le fichier en supprimant ou en reparant le contenu illisible".
+    Pourquoi : le tableau de la feuille traitee est un tableau Power Query.
+    openpyxl ne sait pas recopier la requete ni sa connexion, mais il gardait
+    3 traces qui pointent vers elles. Excel les trouve orphelines et affiche,
+    a chaque ouverture, "Excel a pu ouvrir le fichier en supprimant ou en
+    reparant le contenu illisible" :
 
-    En enlevant cette etiquette, le tableau devient un tableau Excel classique :
-    meme plage, meme style, memes filtres, et le fichier s'ouvre sans message.
-    Seul le lien vers la requete (qui etait perdu de toute facon) disparait.
+      1. l'etiquette du tableau (tableType="queryTable")
+         -> "Enregistrements supprimes : Tableau dans /xl/tables/tableN.xml"
+      2. sur chaque colonne du tableau, le lien vers le champ de la requete
+         (queryTableFieldId, uniqueName) -> meme message
+      3. les noms caches "ExternalData_1, _2..." qui designent la zone remplie
+         par la requete -> "Partie supprimee : Plage de donnees externes"
+
+    Une fois ces traces retirees, le tableau devient un tableau Excel normal
+    (meme plage, meme style, memes filtres) et le fichier s'ouvre sans message.
+    Seul le lien vers la requete, deja perdu, disparait.
     """
-    transformes = []
+    transformes: list[str] = []
     for sheet in workbook.worksheets:
         for table in getattr(sheet, "tables", {}).values():
+            touche = False
             if getattr(table, "tableType", None):
                 table.tableType = None
+                touche = True
+            for colonne in getattr(table, "tableColumns", None) or []:
+                if getattr(colonne, "queryTableFieldId", None) is not None:
+                    colonne.queryTableFieldId = None
+                    touche = True
+                if getattr(colonne, "uniqueName", None) is not None:
+                    colonne.uniqueName = None
+                    touche = True
+            if touche:
                 transformes.append(f"{sheet.title}!{table.name}")
-    if transformes:
-        message = ("Tableau(x) Power Query converti(s) en tableau Excel normal : "
-                   + ", ".join(transformes)
+
+    noms_retires: list[str] = []
+    conteneurs = [("", getattr(workbook, "defined_names", None))]
+    conteneurs += [(f"{ws.title}!", getattr(ws, "defined_names", None)) for ws in workbook.worksheets]
+    for prefixe, noms in conteneurs:
+        if not noms:
+            continue
+        for nom in [n for n in list(noms.keys()) if str(n).lower().startswith("externaldata_")]:
+            try:
+                del noms[nom]
+                noms_retires.append(prefixe + str(nom))
+            except Exception:                                   # pragma: no cover
+                pass
+
+    if transformes or noms_retires:
+        details = []
+        if transformes:
+            details.append("tableau(x) Power Query converti(s) en tableau Excel normal : "
+                           + ", ".join(transformes))
+        if noms_retires:
+            details.append(f"{len(noms_retires)} plage(s) de donnees externes orpheline(s) retiree(s)")
+        message = ("Nettoyage Power Query : " + " ; ".join(details)
                    + " (la connexion a la requete n'est pas recopiable ; "
                      "le fichier s'ouvre ainsi sans message de reparation).")
         log.info(message)
@@ -442,6 +477,10 @@ def _extend_ranges(target: TargetData, added: int, log: ProcessLogger, result: W
         table.ref = new_ref
         if table.autoFilter is not None:
             table.autoFilter.ref = new_ref
+        if getattr(table, "sortState", None) is not None:
+            # Le dernier tri memorise ne couvre plus toute la plage : on l'oublie
+            # (les donnees ne bougent pas, Excel ne garde simplement plus ce tri).
+            table.sortState = None
         log.info(f"Tableau '{layout.table_name}' agrandi : {new_ref}")
 
     if ws.auto_filter and ws.auto_filter.ref:
@@ -504,8 +543,19 @@ def verifier_fichier(chemin: str | Path) -> list[str]:
                 if 'tableType="queryTable"' in xml and rel not in parties:
                     problemes.append(f"tableau de requete sans requete : {table}")
 
-            # 3. reference externe declaree mais absente
+            # 2b. colonnes encore reliees a un champ de requete dans un tableau normal
+            for table in [n for n in parties if re.match(r"xl/tables/table\d+\.xml$", n)]:
+                xml = archive.read(table).decode("utf-8", "ignore")
+                if 'tableType="queryTable"' not in xml and "queryTableFieldId" in xml:
+                    problemes.append(f"colonne reliee a une requete disparue : {table}")
+
+            # 2c. plage de donnees externes (nom ExternalData_*) sans requete
             classeur = archive.read("xl/workbook.xml").decode("utf-8", "ignore")
+            if re.search(r'<definedName[^>]*name="ExternalData_', classeur) and \
+                    not any(n.startswith("xl/queryTables/") for n in parties):
+                problemes.append("plage de donnees externes orpheline (nom ExternalData_*)")
+
+            # 3. reference externe declaree mais absente
             if "<externalReference" in classeur and not any("externalLink" in n for n in parties):
                 problemes.append("reference externe declaree dans workbook.xml mais absente du fichier")
 

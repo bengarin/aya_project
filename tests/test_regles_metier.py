@@ -409,7 +409,17 @@ class TestFichierOuvrableParExcel(BaseCase):
 
         if table_de_requete:
             for nom in [n for n in ordre if n.startswith("xl/tables/")]:
-                parties[nom] = parties[nom].replace(b"<table ", b'<table tableType="queryTable" ', 1)
+                xml = parties[nom].replace(b"<table ", b'<table tableType="queryTable" ', 1)
+                # comme dans le vrai fichier : chaque colonne est reliee a un champ de la requete
+                compteur = iter(range(1, 100))
+                xml = re.sub(rb'<tableColumn ', lambda m: b'<tableColumn uniqueName="%d" queryTableFieldId="%d" '
+                             % ((n := next(compteur)), n), xml)
+                parties[nom] = xml
+            # ... et un nom cache "ExternalData_1" designe la zone remplie par la requete
+            classeur = parties["xl/workbook.xml"]
+            nom_cache = (b'<definedNames><definedName name="ExternalData_1" localSheetId="1" hidden="1">'
+                         b"'BDD PROMOTERS MONTH'!$A$1:$N$13</definedName></definedNames>")
+            parties["xl/workbook.xml"] = classeur.replace(b"</sheets>", b"</sheets>" + nom_cache, 1)
 
         if valeur_calculee:
             for nom in [n for n in ordre if n.startswith("xl/worksheets/sheet")]:
@@ -431,9 +441,19 @@ class TestFichierOuvrableParExcel(BaseCase):
         from excel_writer import verifier_fichier
 
         target = self._injecter(table_de_requete=True, valeur_calculee=False)
+        # le fichier d'entree a bien les defauts que signalait Excel
+        defauts = verifier_fichier(target)
+        self.assertTrue(any("ExternalData" in d for d in defauts), defauts)
+        self.assertTrue(any("requete" in d for d in defauts), defauts)
         self.run_pipeline(target=target)
         self.assertEqual(verifier_fichier(self.output), [],
                          "le fichier resultat contient une reference cassee : Excel demanderait a le reparer")
+        import zipfile
+        with zipfile.ZipFile(self.output) as archive:
+            tables = b"".join(archive.read(n) for n in archive.namelist() if n.startswith("xl/tables/table"))
+            classeur = archive.read("xl/workbook.xml")
+        self.assertNotIn(b"queryTableFieldId", tables, "colonnes encore reliees a la requete disparue")
+        self.assertNotIn(b"ExternalData_", classeur, "plage de donnees externes orpheline")
 
     def test_tableau_power_query_converti_en_tableau_normal(self):
         target = self._injecter(table_de_requete=True, valeur_calculee=False)
@@ -470,3 +490,54 @@ class TestFichierOuvrableParExcel(BaseCase):
             for nom in ordre:
                 archive.writestr(nom, parties[nom])
         self.assertTrue(verifier_fichier(casse), "le verificateur doit signaler le tableau de requete casse")
+
+
+class TestLignesAbimees(BaseCase):
+    """Cas de la capture : Store correct, mais Division1 / Code Store / Column1 abimes."""
+
+    def _abimer(self, lignes, garder_division=True, entete_m=None) -> Path:
+        wb = openpyxl.load_workbook(self.files["target"])
+        ws = wb[SHEET]
+        for row in lignes:
+            for column in ("Division1", "KAM", "ID Promoter", "Code Store", "Promoter", "DAY", "Column1"):
+                ws.cell(row, COL[column], "aaaaaaaaaaa")
+            if not garder_division:
+                ws.cell(row, COL["Division"], "aaaaaaaaaaa")
+        if entete_m:
+            ws.cell(1, COL["IDAYA"], entete_m)
+        chemin = self.folder / "BDD_ABIMEE.xlsx"
+        wb.save(chemin)
+        return chemin
+
+    def test_ligne_abimee_corrigee_sur_place_grace_a_la_colonne_division(self):
+        target = self._abimer([L_VD_EXISTANT, L_DA_EXISTANT])
+        plan, _ = self.run_pipeline(target=target)
+        ws = self.sheet()
+        # corrigees sur place ...
+        self.assertEqual(self.decision_of(plan, L_VD_EXISTANT), MODIFIEE)
+        self.assertEqual(self.decision_of(plan, L_DA_EXISTANT), MODIFIEE)
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Division1"), "VD")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "ID Promoter"), "IDVD123")
+        self.assertEqual(self.cell(ws, L_VD_EXISTANT, "Column1"), "C123VD")
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "Division1"), "DA")
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "Promoter"), "PROMO DA KENITRA")
+        self.assertEqual(self.cell(ws, L_DA_EXISTANT, "KAM"), "KAM DA KENITRA")
+        # ... et aucune ligne en double creee a la place
+        self.assertEqual(plan.stats.lignes_ajoutees, 1)          # seule la vraie creation C200DA
+        cles = [self.cell(ws, row, "Column1") for row in range(2, ws.max_row + 1)]
+        self.assertEqual(cles.count("C123VD"), 1)
+        self.assertEqual(cles.count("C123DA"), 1)
+
+    def test_ligne_sans_aucune_division_lisible_a_verifier(self):
+        target = self._abimer([L_VD_EXISTANT], garder_division=False)
+        plan, _ = self.run_pipeline(target=target)
+        self.assertEqual(self.decision_of(plan, L_VD_EXISTANT), A_VERIFIER)
+        self.assertIn("ni VD ni DA", self.reason_of(plan, L_VD_EXISTANT))
+
+    def test_colonne_nommee_ID_reconnue_comme_IDAYA(self):
+        target = self._abimer([], entete_m="ID")
+        self.run_pipeline(target=target)
+        ws = self.sheet()
+        # la ligne creee ne recopie pas le numero de sa ligne soeur (pas de doublon d'ID)
+        self.assertIsNone(self.cell(ws, L_CREEE, "IDAYA"))
+        self.assertEqual(self.cell(ws, L_VDDA_VD, "IDAYA"), 3)   # les ID existants ne bougent pas
