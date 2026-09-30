@@ -1,5 +1,6 @@
 AUTOMATISATION EXCEL AYA - version portable
 ===========================================
+Developpe par Achraf Bengarin
 
 DEMARRER
   1. Decompressez le ZIP (clic droit > "Extraire tout...") dans un dossier a vous,

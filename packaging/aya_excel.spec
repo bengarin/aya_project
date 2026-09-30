@@ -23,7 +23,7 @@ from PyInstaller.utils.win32.versioninfo import (
 
 ROOT = Path(SPECPATH).resolve().parent
 sys.path.insert(0, str(ROOT))
-from version import APP_NAME, VERSION  # noqa: E402
+from version import APP_NAME, AUTHOR, COPYRIGHT, VERSION  # noqa: E402
 
 ICON = str(ROOT / "assets" / "aya.ico")
 _v = tuple(int(x) for x in VERSION.split(".")) + (0,) * (4 - len(VERSION.split(".")))
@@ -34,8 +34,9 @@ def version_info(internal_name: str) -> VSVersionInfo:
         ffi=FixedFileInfo(filevers=_v, prodvers=_v),
         kids=[
             StringFileInfo([StringTable("040C04B0", [
-                StringStruct("CompanyName", "AYA"),
+                StringStruct("CompanyName", AUTHOR),
                 StringStruct("FileDescription", APP_NAME),
+                StringStruct("LegalCopyright", COPYRIGHT),
                 StringStruct("FileVersion", VERSION),
                 StringStruct("InternalName", internal_name),
                 StringStruct("OriginalFilename", internal_name + ".exe"),

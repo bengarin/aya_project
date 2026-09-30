@@ -19,14 +19,18 @@
 
 #define AppName "Automatisation Excel AYA"
 #define AppExe  "AYA_Excel.exe"
+#define AppAuthor "Achraf Bengarin"
 
 [Setup]
 ; AppId FIXE : c'est lui qui permet la mise a jour "par-dessus". Ne jamais le changer.
 AppId={{CB0C2B5A-B86D-40AE-9C36-805123AF172D}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName={#AppName} {#AppVersion}
-AppPublisher=AYA
+AppVerName={#AppName} {#AppVersion} - par {#AppAuthor}
+AppPublisher={#AppAuthor}
+AppCopyright=(c) 2026 {#AppAuthor}
+VersionInfoCompany={#AppAuthor}
+VersionInfoCopyright=(c) 2026 {#AppAuthor}
 VersionInfoVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\AYA Excel
 DefaultGroupName={#AppName}
@@ -44,6 +48,7 @@ UninstallDisplayName={#AppName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+AppComments=Developpe par {#AppAuthor}
 CloseApplications=yes
 RestartApplications=no
 

@@ -41,6 +41,7 @@ from logger import (                                            # noqa: E402
 )
 from pipeline import PipelineError, Selection, Session          # noqa: E402
 from processor import Options                                   # noqa: E402
+from version import CREDIT, VERSION                             # noqa: E402
 
 try:                                                            # look moderne si disponible
     import customtkinter as ctk
@@ -189,7 +190,7 @@ class App:
             style = ttk.Style(self.root)
             if "clam" in style.theme_names():
                 style.theme_use("clam")
-        self.root.title(APP_TITLE)
+        self.root.title(f"{APP_TITLE}  -  {CREDIT}")
         self.root.report_callback_exception = self._on_tk_error
         if sys.platform.startswith("win"):
             icon = app_paths.resource_path("aya.ico")
@@ -272,6 +273,8 @@ class App:
                  fg=C["primary"]).pack(side="left")
         tk.Label(header, text="  Reference (jamais modifiee)  +  BDD a traiter  +  Affectation KAM",
                  font=FONT, bg=C["bg"], fg=C["muted"]).pack(side="left")
+        tk.Label(header, text=f"{CREDIT}  |  v{VERSION}", font=FONT_SMALL, bg=C["bg"],
+                 fg=C["muted"]).pack(side="right")
 
         self._build_step1(container)
         self._build_step2(container)

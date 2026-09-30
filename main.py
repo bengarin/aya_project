@@ -25,13 +25,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import app_paths                                             # noqa: E402
 from pipeline import PipelineError, Selection, Session       # noqa: E402
 from processor import Options                                # noqa: E402
-from version import APP_NAME, VERSION                        # noqa: E402
+from version import APP_NAME, CREDIT_ASCII, VERSION          # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aya-excel",
-        description=f"{APP_NAME} - traitement BDD commissions (Reference + BDD + Affectation KAM)",
+        description=f"{APP_NAME} - traitement BDD commissions (Reference + BDD + Affectation KAM). {CREDIT_ASCII}",
     )
     parser.add_argument("--cli", action="store_true", help="traitement en ligne de commande (sans fenetre)")
     parser.add_argument("-r", "--reference", help="Fichier 1 : Reference (lecture seule)")
@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="numeroter automatiquement IDAYA sur les lignes CREEES uniquement")
     parser.add_argument("--smoke-test", action="store_true",
                         help="ouvrir la fenetre puis la fermer seule (verification du paquet)")
-    parser.add_argument("--version", action="version", version=f"{APP_NAME} {VERSION}")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} {VERSION} - {CREDIT_ASCII}")
     return parser
 
 

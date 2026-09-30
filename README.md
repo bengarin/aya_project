@@ -1,5 +1,7 @@
 # Automatisation Excel AYA
 
+*Développé par **Achraf Bengarin***
+
 Logiciel de bureau (Windows / macOS / Linux) qui met a jour la BDD des commissions
 a partir du fichier Reference des promoteurs et du fichier d'affectation des KAM.
 
