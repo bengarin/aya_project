@@ -51,6 +51,8 @@ WizardStyle=modern
 AppComments=Developpe par {#AppAuthor}
 CloseApplications=yes
 RestartApplications=no
+; Logiciel ouvert pendant une mise a jour -> "DeleteFile code 5 Acces refuse" :
+; gere dans [Code] (FermerLogiciel) AVANT de toucher aux fichiers.
 
 [Languages]
 Name: "fr"; MessagesFile: "compiler:Languages\French.isl"
@@ -75,3 +77,76 @@ Filename: "{app}\{#AppExe}"; Description: "Lancer {#AppName}"; Flags: nowait pos
 
 ; La desinstallation supprime le dossier du programme seulement.
 ; La config (%APPDATA%\AYA Excel) et les journaux restent : ce sont des donnees utilisateur.
+
+[Code]
+{ Logiciel encore ouvert (y compris une ancienne version sans AppMutex) ?
+  Sinon Windows refuse de remplacer AYA_Excel.exe : "DeleteFile a echoue ; code 5". }
+function ProcessusOuvert(const Nom: String): Boolean;
+var
+  Locator, Service, Liste: Variant;
+begin
+  Result := False;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('', 'root\CIMV2', '', '');
+    Liste := Service.ExecQuery(Format('SELECT ProcessId FROM Win32_Process WHERE Name="%s"', [Nom]));
+    Result := Liste.Count > 0;
+  except
+    Log('Detection du logiciel ouvert impossible : ' + GetExceptionMessage);
+  end;
+end;
+
+function LogicielOuvert: Boolean;
+begin
+  Result := ProcessusOuvert('AYA_Excel.exe') or ProcessusOuvert('AYA_Excel_CLI.exe');
+end;
+
+{ Ferme toutes les fenetres du logiciel. '' = OK, sinon message d'erreur. }
+function FermerLogiciel: String;
+var
+  Code, Essai: Integer;
+begin
+  Result := '';
+  if not LogicielOuvert then
+    exit;
+  Log('Automatisation Excel AYA est ouvert');
+  if SuppressibleMsgBox('Automatisation Excel AYA est encore ouvert.' + #13#10#13#10 +
+       'Cliquez OK pour le fermer automatiquement et continuer' + #13#10 +
+       '(vos fichiers Excel ne sont pas touches).',
+       mbConfirmation, MB_OKCANCEL, IDOK) <> IDOK then
+  begin
+    Result := 'Fermez Automatisation Excel AYA, puis recommencez.';
+    exit;
+  end;
+  { plusieurs fenetres ouvertes possibles : on recommence jusqu'a ce que tout soit ferme }
+  for Essai := 1 to 10 do
+  begin
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM AYA_Excel.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM AYA_Excel_CLI.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    Sleep(1000);
+    if not LogicielOuvert then
+    begin
+      Log(Format('Logiciel ferme (essai %d)', [Essai]));
+      exit;
+    end;
+  end;
+  Result := 'Impossible de fermer Automatisation Excel AYA.' + #13#10 +
+            'Fermez-le (ou redemarrez le PC), puis recommencez.';
+end;
+
+{ Installation / mise a jour : on s'arrete AVANT de toucher aux fichiers si besoin. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := FermerLogiciel;
+end;
+
+{ Desinstallation : meme verification. }
+function InitializeUninstall: Boolean;
+var
+  Erreur: String;
+begin
+  Erreur := FermerLogiciel;
+  Result := Erreur = '';
+  if not Result then
+    SuppressibleMsgBox(Erreur, mbError, MB_OK, IDOK);
+end;

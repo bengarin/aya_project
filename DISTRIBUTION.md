@@ -33,7 +33,8 @@ le logiciel lit 3 fichiers Excel et écrit un nouveau fichier. Rien à protéger
 1. Changer le numéro dans `version.py` (ex. `1.1.0` → `1.2.0`).
 2. Construire (section 4).
 3. Envoyer le nouvel `AYA_Excel_Setup_1.2.0.exe`.
-4. L'utilisateur ferme le logiciel et lance le nouvel installateur : il remplace l'ancienne version
+4. L'utilisateur lance le nouvel installateur (depuis la 1.2.1, si le logiciel est encore ouvert,
+   l'installateur propose de le fermer tout seul : plus d'erreur « DeleteFile code 5 ») : il remplace l'ancienne version
    au même endroit (même `AppId` dans `packaging/installer.iss` — **ne jamais le changer**).
    Réglages et fichiers Excel conservés.
 
