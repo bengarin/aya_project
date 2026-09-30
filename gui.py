@@ -37,7 +37,7 @@ import app_paths                                                # noqa: E402
 from excel_reader import list_sheet_names                       # noqa: E402
 from logger import (                                            # noqa: E402
     A_VERIFIER, CONFORME, CREEE, DUPLICATE, ERREUR, IGNOREE,
-    KAM_NON_TROUVE, MODIFIEE, ROUGE, STORE_NON_TROUVE,
+    ID_APPROCHE, ID_NON_TROUVE, KAM_NON_TROUVE, MODIFIEE, ROUGE, STORE_NON_TROUVE,
 )
 from pipeline import PipelineError, Selection, Session          # noqa: E402
 from processor import Options                                   # noqa: E402
@@ -84,6 +84,8 @@ LEVEL_COLORS = {
     ROUGE: C["red"],
     STORE_NON_TROUVE: C["gray"],
     KAM_NON_TROUVE: C["amber"],
+    ID_NON_TROUVE: C["amber"],
+    ID_APPROCHE: C["amber"],
     CREEE: C["primary"],
     MODIFIEE: C["blue"],
     CONFORME: C["green"],
@@ -101,7 +103,8 @@ CARTES = [
 ]
 # Le reste, en une ligne discrete
 DETAILS = ["Lignes analysees", "Stores non trouves", "KAM trouves",
-           "KAM non trouves", "Duplicates evites"]
+           "KAM non trouves", "Duplicates evites",
+           "IDs trouves (dossier)", "IDs par nom approche"]    # IDs : seulement si dossier choisi
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +220,7 @@ class App:
         self.var_ref = tk.StringVar()
         self.var_target = tk.StringVar()
         self.var_kam = tk.StringVar()
+        self.var_ids = tk.StringVar()          # dossier des IDs (optionnel)
         self.var_ref_sheet = tk.StringVar(value=AUTO)
         self.var_target_sheet = tk.StringVar(value=AUTO)
         self.var_kam_sheet = tk.StringVar(value=AUTO)
@@ -273,7 +277,11 @@ class App:
                  fg=C["primary"]).pack(side="left")
         tk.Label(header, text="  Reference (jamais modifiee)  +  BDD a traiter  +  Affectation KAM",
                  font=FONT, bg=C["bg"], fg=C["muted"]).pack(side="left")
-        tk.Label(header, text=f"{CREDIT}  |  v{VERSION}", font=FONT_SMALL, bg=C["bg"],
+
+        # Barre du bas (packee AVANT les etapes : toujours visible, meme fenetre reduite)
+        footer = tk.Frame(container, bg=C["bg"])
+        footer.pack(side="bottom", fill="x", pady=(4, 0))
+        tk.Label(footer, text=f"{CREDIT}  |  version {VERSION}", font=FONT_SMALL, bg=C["bg"],
                  fg=C["muted"]).pack(side="right")
 
         self._build_step1(container)
@@ -283,7 +291,7 @@ class App:
     # ------------------------------------------------------------------
     def _build_step1(self, parent) -> None:
         card = self._card(parent)
-        self._step_header(card, 1, "Choisir les 3 fichiers",
+        self._step_header(card, 1, "Choisir les fichiers",
                           "la feuille est detectee toute seule")
         grid = tk.Frame(card, bg=C["card"])
         grid.pack(fill="x", padx=16, pady=(0, 14))
@@ -308,6 +316,20 @@ class App:
             combo.grid(row=index, column=4, padx=(6, 0))
             combo.bind("<<ComboboxSelected>>", lambda _e: self._reset_analysis())
             self.sheet_combos[kind] = combo
+
+        # Dossier des IDs (OPTIONNEL) : IDAYA lu dans les noms de fichiers "35-Store DA.pdf"
+        ligne = len(rows)
+        tk.Label(grid, text="Dossier des IDs", font=FONT_BOLD, bg=C["card"], fg=C["ink"],
+                 anchor="w", width=17).grid(row=ligne, column=0, sticky="w", pady=4)
+        tk.Label(grid, text="optionnel", font=FONT_SMALL, bg=C["card"], fg=C["muted"],
+                 anchor="w", width=15).grid(row=ligne, column=1, sticky="w")
+        entry = _entry(grid, self.var_ids)
+        entry.grid(row=ligne, column=2, sticky="ew", padx=8, pady=4)
+        self.path_entries["ids"] = entry
+        _button(grid, "Parcourir", self.choose_ids_folder,
+                kind="normal", width=110).grid(row=ligne, column=3, padx=4)
+        _button(grid, "Sans dossier", self.clear_ids_folder,
+                kind="normal", width=110).grid(row=ligne, column=4, padx=(6, 0), sticky="w")
         grid.grid_columnconfigure(2, weight=1)
 
     # ------------------------------------------------------------------
@@ -415,6 +437,9 @@ class App:
             if path and Path(path).exists():
                 var.set(path)
                 self._fill_sheets(key, path)
+        ids = data.get("ids", "")
+        if ids and Path(ids).is_dir():
+            self.var_ids.set(ids)
         if any(v.get() for v in (self.var_ref, self.var_target, self.var_kam)):
             self.var_status.set("Derniers fichiers utilises recharges. Verifiez-les puis lancez l'analyse.")
         self._refresh_step1()
@@ -425,6 +450,7 @@ class App:
                 "reference": self.var_ref.get(),
                 "target": self.var_target.get(),
                 "kam": self.var_kam.get(),
+                "ids": self.var_ids.get(),
             }, ensure_ascii=False, indent=2))
         except Exception:                                       # pragma: no cover
             logging.exception("Sauvegarde de la configuration impossible")
@@ -468,6 +494,27 @@ class App:
         self.var_status.set(f"{titles[kind]} : {Path(path).name}")
         self._refresh_step1()
 
+    def choose_ids_folder(self) -> None:
+        current = self.var_ids.get().strip()
+        path = filedialog.askdirectory(
+            title="Dossier des IDs (fichiers nommes '35-Store DA...')",
+            initialdir=current or None, mustexist=True,
+        )
+        if not path:
+            return
+        self.var_ids.set(path)
+        self._save_config()
+        self._reset_analysis()
+        self.var_status.set(f"Dossier des IDs : {Path(path).name} (IDAYA lu dans les noms de fichiers)")
+
+    def clear_ids_folder(self) -> None:
+        if not self.var_ids.get():
+            return
+        self.var_ids.set("")
+        self._save_config()
+        self._reset_analysis()
+        self.var_status.set("Sans dossier des IDs : la colonne IDAYA ne sera pas modifiee.")
+
     def _refresh_step1(self) -> None:
         pret = all(v.get().strip() for v in (self.var_ref, self.var_target, self.var_kam))
         self._mark_step(1, pret)
@@ -486,6 +533,7 @@ class App:
             reference_sheet=sheet(self.var_ref_sheet),
             target_sheet=sheet(self.var_target_sheet),
             kam_sheets=[kam_sheet] if kam_sheet else None,
+            ids_folder=self.var_ids.get().strip() or None,
         )
 
     def _reset_analysis(self) -> None:
@@ -637,7 +685,7 @@ class App:
         stats = dict(plan.stats.as_pairs())
         for label, var in self.stat_vars.items():
             var.set(str(stats.get(label, 0)))
-        self.var_details.set("   ".join(f"{name} : {stats.get(name, 0)}" for name in DETAILS))
+        self.var_details.set("   ".join(f"{name} : {stats[name]}" for name in DETAILS if name in stats))
 
         self.rows = plan.logger.display_rows()
         self._build_filters()

@@ -25,9 +25,10 @@ from typing import Callable
 from excel_reader import ReferenceData, ReferenceRow, TargetData, TargetRow
 from kam_service import AMBIGUOUS, KamService, NOT_FOUND, WRONG_DIVISION
 from logger import (
-    A_VERIFIER, CONFORME, CREEE, DUPLICATE, IGNOREE, KAM_NON_TROUVE,
+    A_VERIFIER, CONFORME, CREEE, DUPLICATE, ID_APPROCHE, ID_NON_TROUVE, IGNOREE, KAM_NON_TROUVE,
     MODIFIEE, ProcessLogger, ROUGE, STORE_NON_TROUVE,
 )
+from id_service import APPROX, FOUND, IdService
 from matcher import build_key, norm_division, norm_store, split_divisions
 
 # Les seules divisions traitees automatiquement (regle 3).
@@ -44,8 +45,10 @@ COLONNES_ECRITES = ("Division", "Division1", "KAM", "ID Promoter", "Code Store",
                     "Promoter", "Store", "City", "DAY", "Column1")
 
 # Colonnes jamais modifiees sur une ligne existante : Annee (A), Mois (B),
-# STATUT (K), IDAYA (M) -> regle 13 et "ne rien inventer".
-COLONNES_NON_TOUCHEES = ("Annee", "Mois", "STATUT", "IDAYA")
+# STATUT (K) -> regle 13 et "ne rien inventer".
+# IDAYA (M) : modifiee UNIQUEMENT avec le numero lu dans le dossier des IDs
+# (id_service.py) ; sans dossier, ou si le Store n'y est pas, elle n'est pas touchee.
+COLONNES_NON_TOUCHEES = ("Annee", "Mois", "STATUT")
 
 
 @dataclass
@@ -101,6 +104,10 @@ class Stats:
     kam_non_trouves: int = 0
     duplicates_evites: int = 0
     a_verifier: int = 0
+    ids_actifs: bool = False          # un dossier des IDs a ete fourni
+    ids_trouves: int = 0
+    ids_approches: int = 0
+    ids_non_trouves: int = 0
 
     def as_pairs(self) -> list[tuple[str, int]]:
         return [
@@ -114,7 +121,11 @@ class Stats:
             ("KAM non trouves", self.kam_non_trouves),
             ("Duplicates evites", self.duplicates_evites),
             ("A verifier", self.a_verifier),
-        ]
+        ] + ([
+            ("IDs trouves (dossier)", self.ids_trouves),
+            ("IDs par nom approche", self.ids_approches),
+            ("IDs non trouves", self.ids_non_trouves),
+        ] if self.ids_actifs else [])
 
 
 @dataclass
@@ -138,6 +149,7 @@ class Processor:
         kam: KamService,
         options: Options | None = None,
         logger: ProcessLogger | None = None,
+        ids: IdService | None = None,
     ) -> None:
         self.reference = reference
         self.target = target
@@ -145,6 +157,8 @@ class Processor:
         self.options = options or Options()
         self.log = logger or ProcessLogger()
         self.plan = Plan(logger=self.log)
+        self.ids = ids if ids is not None and "IDAYA" in target.layout.columns else None
+        self.plan.stats.ids_actifs = self.ids is not None
 
         self._rows_by_number: dict[int, TargetRow] = {}
         self._rows_by_store: dict[str, list[TargetRow]] = {}
@@ -246,6 +260,10 @@ class Processor:
 
         self._decider_lignes_restantes()
         self._verifier_cles_en_double()
+        if self.ids is not None:
+            for filename in self.ids.unused():
+                self.log.log(ID_NON_TROUVE, f"Fichier '{filename}' non utilise : aucun Store / Division "
+                                            "correspondant dans la Reference et le fichier 2.")
         return self.plan
 
     # ------------------------------------------------------------------
@@ -280,6 +298,7 @@ class Processor:
             for division in divisions:
                 par_division.setdefault(division, []).append(entry)
 
+        divisions_du_store = {d for d in par_division if d in DIVISIONS_TRAITEES}
         for division in sorted(par_division):
             entries = par_division[division]
 
@@ -317,11 +336,12 @@ class Processor:
                 )
                 continue
 
-            self._traiter_affectation(next(iter(distinctes.values())), division, store_label, store_key)
+            self._traiter_affectation(next(iter(distinctes.values())), division, store_label, store_key,
+                                      divisions_du_store)
 
     # ------------------------------------------------------------------
     def _traiter_affectation(self, entry: ReferenceRow, division: str, store_label: str,
-                             store_key: str = "") -> None:
+                             store_key: str = "", divisions_du_store: set[str] | None = None) -> None:
         """STEP 5 a 8 pour une combinaison Code Store + Division."""
         key = build_key(entry.store_code, division)
         ligne = self._trouver_ligne(key, store_key or norm_store(entry.store), division)
@@ -357,12 +377,39 @@ class Processor:
                          row=ligne.row if ligne else None, store=store_label, division=division)
 
         valeurs = self._valeurs_reference(entry, division, key, kam_value)
+        id_reason = self._chercher_id(entry, division, store_label, divisions_du_store or {division},
+                                      valeurs, ligne)
+        if id_reason:
+            kam_reason += " " + id_reason
 
         if ligne is not None:
             self._planifier_update(ligne, valeurs, entry, division, store_label, key, kam_reason)
         else:
             self._planifier_creation(entry, division, store_label, key, valeurs, kam_reason)
         self._keys_traitees.add(key)
+
+    # ------------------------------------------------------------------
+    def _chercher_id(self, entry: ReferenceRow, division: str, store_label: str,
+                     divisions_du_store: set[str], valeurs: dict[str, str],
+                     ligne: TargetRow | None) -> str:
+        """IDAYA lu dans le dossier des IDs (nom de fichier 'numero-Store Division')."""
+        if self.ids is None:
+            return ""
+        noms = [n for n in (entry.store, store_label) if n]
+        result = self.ids.lookup(noms, division, divisions_du_store)
+        row = ligne.row if ligne else None
+        if result.status in (FOUND, APPROX):
+            valeurs["IDAYA"] = result.value
+            self.plan.stats.ids_trouves += 1
+            if result.status == APPROX:
+                self.plan.stats.ids_approches += 1
+                self.log.log(ID_APPROCHE, result.reason, row=row, store=store_label, division=division)
+            return result.reason + "."
+        self.plan.stats.ids_non_trouves += 1
+        suite = ("IDAYA existant conserve" if ligne is not None
+                 else "IDAYA de la ligne creee non rempli par le dossier")
+        self.log.log(ID_NON_TROUVE, f"{result.reason} -> {suite}", row=row, store=store_label, division=division)
+        return f"ID : {result.reason} -> {suite}."
 
     # ------------------------------------------------------------------
     def _trouver_ligne(self, key: str, store_key: str = "", division: str = "") -> TargetRow | None:
@@ -453,14 +500,15 @@ class Processor:
             if not valeur:
                 notes.append(f"{name} laisse vide (absent de la Reference et aucune ligne du meme Code Store)")
 
-        if "IDAYA" in self.target.layout.columns:
+        if "IDAYA" in self.target.layout.columns and not complet.get("IDAYA"):
             if self.options.auto_number_idaya:
                 complet["IDAYA"] = str(self._next_idaya)
                 notes.append(f"IDAYA={self._next_idaya} (numerotation automatique des lignes creees)")
                 self._next_idaya += 1
             else:
                 complet["IDAYA"] = ""
-                notes.append("IDAYA laisse vide (option de numerotation desactivee)")
+                notes.append("IDAYA laisse vide (" + ("absent du dossier des IDs et " if self.ids else "")
+                             + "option de numerotation desactivee)")
 
         self._usage_cles.setdefault(key, []).append(complet.get("Store", store_label))
         self.plan.creations.append(

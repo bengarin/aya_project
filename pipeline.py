@@ -17,6 +17,7 @@ from typing import Callable
 import excel_reader as reader
 from excel_reader import ExcelReadError, ReferenceData, TargetData
 from excel_writer import ExcelWriteError, WriteResult, apply_plan, suggest_output_path
+from id_service import IdService
 from kam_service import KamService
 from logger import ProcessLogger
 from processor import Options, Plan, Processor
@@ -38,6 +39,7 @@ class Selection:
     reference_sheet: str | None = None
     target_sheet: str | None = None
     kam_sheets: list[str] | None = None
+    ids_folder: str | Path | None = None       # OPTIONNEL : dossier des IDs (Etat de vente)
 
     def validate(self) -> None:
         missing = [
@@ -57,6 +59,8 @@ class Selection:
                 raise PipelineError(f"{label} introuvable : {path}")
             if path.suffix.lower() not in (".xlsx", ".xlsm"):
                 raise PipelineError(f"{label} : format non supporte ({path.suffix}). Utilisez .xlsx ou .xlsm")
+        if self.ids_folder and not Path(str(self.ids_folder)).is_dir():
+            raise PipelineError(f"Dossier des IDs introuvable : {self.ids_folder}")
 
 
 @dataclass
@@ -65,6 +69,7 @@ class LoadedData:
     target: TargetData
     kam: KamService
     warnings: list[str] = field(default_factory=list)
+    ids: IdService | None = None
 
     def describe(self) -> str:
         lines = [
@@ -74,6 +79,8 @@ class LoadedData:
             + ", ".join(f"feuille '{l.title}' ({l.data_rows} lignes)" for l in self.kam.data.layouts)
             + f" | {self.kam.summary()}",
         ]
+        if self.ids is not None:
+            lines.append("Dossier des IDs            : " + self.ids.describe())
         return "\n".join(lines)
 
 
@@ -106,6 +113,12 @@ class Session:
             if progress:
                 progress("Lecture du fichier a traiter (peut prendre quelques secondes)...", 0.25)
             target = reader.load_target(self.selection.target, self.selection.target_sheet)
+
+            ids = None
+            if self.selection.ids_folder:
+                if progress:
+                    progress("Lecture du dossier des IDs...", 0.30)
+                ids = IdService.from_folder(self.selection.ids_folder)
         except ExcelReadError as exc:
             raise PipelineError(str(exc)) from exc
         except Exception as exc:                            # pragma: no cover - fichier corrompu
@@ -135,7 +148,15 @@ class Session:
                     f"par POSITION sur la feuille '{layout.title}' (ligne d'en-tetes "
                     f"{layout.header_row}). Verifiez les colonnes detectees."
                 )
-        self.data = LoadedData(reference=reference, target=target, kam=kam, warnings=warnings)
+        if ids is not None:
+            if "IDAYA" not in target.layout.columns:
+                warnings.append("Dossier des IDs fourni mais colonne IDAYA introuvable dans le fichier 2 : IDs non ecrits.")
+            if not ids.files:
+                warnings.append("Le dossier des IDs ne contient aucun fichier nomme 'numero-Store' : aucun ID lu.")
+            if ids.ignored:
+                warnings.append(f"Dossier des IDs : {len(ids.ignored)} fichier(s) ignore(s) (nom sans 'numero-Store') : "
+                                + ", ".join(ids.ignored[:5]) + (" ..." if len(ids.ignored) > 5 else ""))
+        self.data = LoadedData(reference=reference, target=target, kam=kam, warnings=warnings, ids=ids)
         if progress:
             progress("Fichiers charges.", 0.35)
         return self.data
@@ -149,7 +170,7 @@ class Session:
         self.logger = ProcessLogger()
         processor = Processor(
             reference=self.data.reference, target=self.data.target,
-            kam=self.data.kam, options=self.options, logger=self.logger,
+            kam=self.data.kam, options=self.options, logger=self.logger, ids=self.data.ids,
         )
 
         def on_row(done: int, total: int) -> None:

@@ -38,6 +38,7 @@ Mode ligne de commande (automatisation / tests) :
 python main.py --cli -r Reference.xlsx -t BDD.xlsx -k KAM.xlsx -o Resultat.xlsx
 python main.py --cli ... --preview          # analyse seule, aucun fichier ecrit
 python main.py --cli ... --auto-idaya       # numerote IDAYA sur les lignes creees
+python main.py --cli ... --ids-dir "Etat de vente"   # IDAYA lu dans les noms de fichiers
 ```
 
 ---
@@ -77,14 +78,31 @@ Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
 | 7 | **Cle absente** | Une nouvelle ligne est **creee**, **juste sous la ligne du meme Store** (comme "dupliquer la ligne" dans Excel) : pour un `VD+DA` dont seule la ligne DA existe, la ligne VD apparait directement en dessous. |
 | 8 | **KAM** | Recherche par **Store + Division** (feuille VD ou feuille DA). KAM introuvable = colonne ecrite avec le marqueur **`#`** (ligne existante ou creee) + signale. Jamais de KAM copie d'une division a l'autre. |
 | 9 | **Column1** | Toujours recalculee : `Code Store + Division1`, uniquement quand le Code Store et la Division viennent de la Reference. Une ancienne valeur fausse est corrigee. |
-| 10 | **IDAYA** | N'est jamais une cle de duplicate. Les IDAYA existants ne sont jamais modifies. L'option de numerotation ne touche que les lignes **creees**. |
+| 10 | **IDAYA** | N'est jamais une cle de duplicate. **Sans dossier des IDs** : jamais modifie (l'option de numerotation ne touche que les lignes **creees**). **Avec un dossier des IDs** : voir ci-dessous. |
 
 **Colonnes ecrites depuis la Reference** (regles 4 et 5 du cahier des charges) :
 `Division` (C), `Division1` (D), `KAM` (E), `ID Promoter` (F), `Code Store` (G),
 `Promoter` (H), `Store` (I), `City` (J), `DAY` (L), `Column1` (N).
 
 **Colonnes jamais modifiees sur une ligne existante** : `Annee` (A), `Mois` (B),
-`STATUT` (K), `IDAYA` (M).
+`STATUT` (K), et `IDAYA` (M) sauf avec le dossier des IDs.
+
+### IDAYA depuis le dossier des IDs (optionnel)
+On choisit un dossier (ex. `Etat de vente`, sous-dossiers compris). Chaque fichier nomme
+`<numero>-<Store> <Division>` donne l'ID de ce Store + Division :
+
+| Nom du fichier | Ligne DA | Ligne VD |
+|---|---|---|
+| `35-Ashiama panoramique DA.jpeg` / `36-Ashiama panoramique VD.jpeg` | `35` | `36` |
+| `39-Carrefour Ain Sebaa VD+DA.jpg` (un fichier pour les 2) | `39DA` | `39VD` |
+| `40-CARREFOUR BENI MELLAL.jpg` (sans division = tout le Store) | `40DA` | `40VD` |
+
+- Store reconnu meme ecrit autrement (majuscules, espaces, lettres doublees) : `ELECTROBOUSFIHA` = `Electro Boussfiha`.
+- Nom **approche** (>= 85 %, ex. `Berrachid` / `Berrechid`) : ID ecrit **et** signale `ID NOM APPROCHE` dans le rapport.
+- Store absent du dossier : IDAYA existant **conserve** (`ID NON TROUVE` dans le rapport).
+- 2 fichiers qui donnent 2 IDs differents pour le meme Store + Division : **rien ecrit**, signale.
+- Les lignes ROUGE, STORE NON TROUVE, A VERIFIER et IGNOREE ne recoivent jamais d'ID.
+- Verifie sur la BDD d'aout : les 20 IDs du dossier `Etat de vente Part2` = ceux deja saisis a la main.
 
 ### Comment une ligne existante est reconnue
 Dans cet ordre de confiance :
@@ -214,6 +232,7 @@ pipeline.py        orchestration : lecture -> analyse -> ecriture
 excel_reader.py    lecture, detection des feuilles/colonnes (nom puis position)
 matcher.py         normalisation des textes, cles, divisions
 kam_service.py     recherche du KAM par Store + Division
+id_service.py      IDAYA lu dans les noms de fichiers du dossier des IDs
 processor.py       REGLES METIER (produit un plan, ne touche pas a Excel)
 excel_writer.py    application du plan, ecriture d'un nouveau fichier
 logger.py          decision + raison pour chaque ligne, rapports .txt et .xlsx
@@ -232,7 +251,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-39 tests (35 regles metier + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+56 tests (35 regles metier + 17 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

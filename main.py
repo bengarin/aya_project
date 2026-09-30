@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reference-sheet", help="forcer la feuille du fichier 1")
     parser.add_argument("--target-sheet", help="forcer la feuille du fichier 2")
     parser.add_argument("--kam-sheets", nargs="*", help="forcer les feuilles du fichier 3")
+    parser.add_argument("--ids-dir", help="OPTIONNEL : dossier des IDs (fichiers nommes 'numero-Store Division')")
     parser.add_argument("--preview", action="store_true", help="analyser seulement, sans generer le fichier")
     parser.add_argument("--no-report", action="store_true", help="ne pas generer le rapport a cote du resultat")
     parser.add_argument("--auto-idaya", action="store_true",
@@ -59,7 +60,7 @@ def run_cli(args) -> int:
     selection = Selection(
         reference=args.reference, target=args.target, kam=args.kam,
         reference_sheet=args.reference_sheet, target_sheet=args.target_sheet,
-        kam_sheets=args.kam_sheets,
+        kam_sheets=args.kam_sheets, ids_folder=args.ids_dir,
     )
     session = Session(selection, options_from_args(args))
 
