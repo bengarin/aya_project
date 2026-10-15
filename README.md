@@ -96,9 +96,17 @@ On choisit un dossier (ex. `Etat de vente`, sous-dossiers compris). Chaque fichi
 | `35-Ashiama panoramique DA.jpeg` / `36-Ashiama panoramique VD.jpeg` | `35` | `36` |
 | `39-Carrefour Ain Sebaa VD+DA.jpg` (un fichier pour les 2) | `39DA` | `39VD` |
 | `40-CARREFOUR BENI MELLAL.jpg` (sans division = tout le Store) | `40DA` | `40VD` |
+| `81_ASWAK-ASSALAM-KENITRA_VD_Part1.jpg` (format septembre) | - | `81` |
+| `22_ASWAK-ASSALAM-OUJDA_VD-DA_Part1.jpg` + `..._Part2.jpg` | `22DA` | `22VD` |
+
+Separateurs `-`, `_` ou espace ; `VD-DA` = `VD+DA` ; `_Part1`, `_Part2`... et `(1)` ignores
+(plusieurs pages = meme ID).
 
 - Store reconnu meme ecrit autrement (majuscules, espaces, lettres doublees) : `ELECTROBOUSFIHA` = `Electro Boussfiha`.
+- Nom du Store **contenu** dans le nom du fichier avec des mots en plus (`ASHIAMA-PANORAMIQUE-BRANDSHOP`,
+  `MIZA-ELECTRONIQUE-CASABLANCA`) : ID ecrit **et** signale `ID NOM APPROCHE`, sauf si un autre Store colle mieux.
 - Nom **approche** (>= 85 %, ex. `Berrachid` / `Berrechid`) : ID ecrit **et** signale `ID NOM APPROCHE` dans le rapport.
+- Un fichier non utilise est liste avec la facon dont son nom a ete lu (ID, Store, division) : on voit tout de suite le probleme.
 - Store absent du dossier : IDAYA existant **conserve** (`ID NON TROUVE` dans le rapport).
 - 2 fichiers qui donnent 2 IDs differents pour le meme Store + Division : **rien ecrit**, signale.
 - Les lignes ROUGE, STORE NON TROUVE, A VERIFIER et IGNOREE ne recoivent jamais d'ID.
@@ -251,7 +259,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-56 tests (35 regles metier + 17 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+62 tests (35 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

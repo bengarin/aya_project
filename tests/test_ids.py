@@ -51,6 +51,18 @@ class NomDeFichierTest(unittest.TestCase):
             f = parse_filename(nom)
             self.assertEqual((f.number, f.store, set(f.divisions)), (numero, store, divisions), nom)
 
+    def test_format_septembre_underscore_tirets_part(self):
+        cas = {
+            "81_ASWAK-ASSALAM-KENITRA_VD_Part1.jpg": ("81", "ASWAK ASSALAM KENITRA", {"VD"}),
+            "22_ASWAK-ASSALAM-OUJDA_VD-DA_Part2.jpg": ("22", "ASWAK ASSALAM OUJDA", {"VD", "DA"}),
+            "31_CARREFOUR TANGER_VD_Part1.jpg": ("31", "CARREFOUR TANGER", {"VD"}),
+            "30_CARREFOURFES_VD-DA_Part1.jpg": ("30", "CARREFOURFES", {"VD", "DA"}),
+            "75_ASWAK-ASSALAM-AGADIR-DAKHLA_DA_Part1 (1).jpg": ("75", "ASWAK ASSALAM AGADIR DAKHLA", {"DA"}),
+        }
+        for nom, (numero, store, divisions) in cas.items():
+            f = parse_filename(nom)
+            self.assertEqual((f.number, f.store, set(f.divisions)), (numero, store, divisions), nom)
+
     def test_nom_sans_numero_ignore(self):
         self.assertIsNone(parse_filename("Etat de vente.xlsx"))
         self.assertIsNone(parse_filename("12-.pdf"))
@@ -89,6 +101,38 @@ class RegleIdTest(unittest.TestCase):
     def test_store_proche_mais_different_refuse(self):
         ids = service("14-Carrefour Targa VD+DA.jpg")
         self.assertEqual(ids.lookup(["Carrefour Tanger"], "VD", {"VD", "DA"}).status, NOT_FOUND)
+
+    def test_septembre_noms_colles_et_lettres_doublees(self):
+        ids = service("30_CARREFOURFES_VD-DA_Part1.jpg", "37_ELECTRO-BOUSFIHA-DAR-BOUAAZAA_VD_Part1.jpg")
+        self.assertEqual(ids.lookup(["CARREFOUR FES"], "DA", {"VD", "DA"}).value, "30DA")
+        result = ids.lookup(["Electro Boussfiha Dar Bouazza"], "VD", {"VD", "DA"})
+        self.assertEqual((result.status, result.value), (FOUND, "37"))
+
+    def test_part1_part2_meme_id(self):
+        ids = service("72_ASHIAMA-PANORAMIQUE_VD-DA_Part1.jpeg", "72_ASHIAMA-PANORAMIQUE_VD-DA_Part2.jpeg")
+        result = ids.lookup(["Ashiama Panoramique"], "VD", {"VD", "DA"})
+        self.assertEqual((result.status, result.value), (FOUND, "72VD"))
+        self.assertIn("Part2", result.reason)
+
+    def test_mots_en_plus_dans_le_fichier_signale(self):
+        ids = service("91_MIZA-ELECTRONIQUE-CASABLANCA_VD-DA_Part1.jpg",
+                      "72_ASHIAMA-PANORAMIQUE-BRANDSHOP_VD-DA_Part1.jpeg")
+        ids.set_known_stores(["Miza Casablanca", "Ashiama Panoramique", "Ashiama Aeria mall"])
+        result = ids.lookup(["Miza Casablanca"], "DA", {"VD", "DA"})
+        self.assertEqual((result.status, result.value), (APPROX, "91DA"))
+        self.assertIn("ELECTRONIQUE", result.reason)
+        self.assertEqual(ids.lookup(["Ashiama Panoramique"], "VD", {"VD", "DA"}).value, "72VD")
+        self.assertEqual(ids.lookup(["Ashiama Aeria mall"], "VD", {"VD"}).status, NOT_FOUND)
+
+    def test_fichier_d_un_autre_store_plus_precis_jamais_pris(self):
+        ids = service("75_ASWAK-ASSALAM-AGADIR-DAKHLA_DA_Part1.jpg")
+        ids.set_known_stores(["Aswak Assalam Agadir", "Aswak Assalam Agadir Dakhla"])
+        self.assertEqual(ids.lookup(["Aswak Assalam Agadir"], "DA", {"DA"}).status, NOT_FOUND)
+        self.assertEqual(ids.lookup(["Aswak Assalam Agadir Dakhla"], "DA", {"DA"}).value, "75")
+
+    def test_store_d_un_seul_mot_jamais_cherche_contenu(self):
+        ids = service("12_CARREFOUR-TANGER_VD_Part1.jpg")
+        self.assertEqual(ids.lookup(["Carrefour"], "VD", {"VD"}).status, NOT_FOUND)
 
     def test_deux_fichiers_contradictoires(self):
         ids = service("35-Store X DA.pdf", "36-Store X DA.pdf")

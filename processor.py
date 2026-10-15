@@ -159,6 +159,11 @@ class Processor:
         self.plan = Plan(logger=self.log)
         self.ids = ids if ids is not None and "IDAYA" in target.layout.columns else None
         self.plan.stats.ids_actifs = self.ids is not None
+        if self.ids is not None:
+            # tous les Stores connus : un fichier n'est jamais donne a un Store s'il colle mieux a un autre
+            self.ids.set_known_stores(
+                [e.store for entries in reference.by_store.values() for e in entries]
+                + [r.get("Store") for r in target.rows])
 
         self._rows_by_number: dict[int, TargetRow] = {}
         self._rows_by_store: dict[str, list[TargetRow]] = {}
@@ -261,9 +266,9 @@ class Processor:
         self._decider_lignes_restantes()
         self._verifier_cles_en_double()
         if self.ids is not None:
-            for filename in self.ids.unused():
-                self.log.log(ID_NON_TROUVE, f"Fichier '{filename}' non utilise : aucun Store / Division "
-                                            "correspondant dans la Reference et le fichier 2.")
+            for fichier in self.ids.unused():
+                self.log.log(ID_NON_TROUVE, f"Fichier non utilise : {fichier.describe()} -> aucun Store / "
+                                            "Division correspondant dans la Reference et le fichier 2.")
         return self.plan
 
     # ------------------------------------------------------------------
