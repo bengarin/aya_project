@@ -46,13 +46,18 @@ python main.py --cli ... --ids-dir "Etat de vente"   # IDAYA lu dans les noms de
 ## 2. Structure attendue des fichiers
 
 Les colonnes sont reconnues **par leur nom** (majuscules, accents et espaces ignores).
-Si les en-tetes ne sont pas reconnus, le logiciel applique automatiquement les
+Si les en-tetes sont **illisibles** (presque rien de reconnu), le logiciel applique les
 **positions exactes** ci-dessous et le signale dans l'interface.
 
 **Fichier 1 - Reference** - feuille `Feuil2`, en-tetes ligne 1
 | Colonne | C | F | G | H | I | J | L |
 |---|---|---|---|---|---|---|---|
 | Contenu | Divisions | ID Promoter | Store Code | PROMOTER | STORE | CITY | Working Days |
+
+Noms acceptes pour la colonne STORE : `STORE`, `POS` (Liste promoteurs 09-2026), `Magasin`,
+`Point de vente`. **Si les en-tetes sont lisibles mais qu'une colonne manque** (renommee),
+le logiciel **s'arrete** et affiche les en-tetes lus : il ne lit jamais de mauvaises colonnes
+en silence. La lecture par position n'est utilisee que si les en-tetes sont illisibles.
 
 **Fichier 2 - BDD a traiter** - feuille `BDD PROMOTERS MONTH`, en-tetes ligne 1
 | A | B | C | D | E | F | G | H | I | J | K | L | M | N |
@@ -259,7 +264,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-62 tests (35 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+64 tests (37 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

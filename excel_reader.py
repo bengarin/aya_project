@@ -69,7 +69,8 @@ REFERENCE_SPEC = SheetSpec(
         "ID Promoter": ("id promoteur", "idpromoter", "id promo"),
         "Store Code": ("code store", "code magasin", "storecode"),
         "PROMOTER": ("promoteur", "nom promoteur"),
-        "STORE": ("magasin", "store name", "nom store"),
+        "STORE": ("magasin", "store name", "nom store", "nom magasin",
+                  "pos", "point de vente", "pdv"),        # "POS" : Liste promoteurs 09-2026
         "Divisions": ("division",),
         "Working Days": ("working day", "day", "days", "jours", "nb jours"),
         "CITY": ("ville", "city"),
@@ -328,12 +329,32 @@ def pick_layout(layouts: list[SheetLayout], spec: SheetSpec, wanted: str | None 
     )
 
 
+# Au-dela de ce nombre de colonnes reconnues, les en-tetes sont LISIBLES : s'il en
+# manque une, c'est qu'elle a ete renommee -> message clair, jamais de repli par position
+# (le repli lirait de mauvaises colonnes et ne traiterait rien, sans le dire).
+EN_TETES_LISIBLES = 3
+
+
 def pick_layout_or_positional(wb, layouts: list[SheetLayout], spec: SheetSpec,
                               wanted: str | None = None) -> SheetLayout:
-    """Comme pick_layout, mais avec le repli 'colonnes par position' des regles."""
+    """Comme pick_layout, mais avec le repli 'colonnes par position' des regles.
+
+    Le repli n'est utilise que si les en-tetes sont ILLISIBLES (presque rien de reconnu).
+    """
     try:
         return pick_layout(layouts, spec, wanted)
     except ExcelReadError:
+        candidates = [l for l in layouts if not wanted or l.title == wanted]
+        best = max(candidates, key=lambda l: len(l.columns), default=None)
+        if best is not None and len(best.columns) >= EN_TETES_LISIBLES:
+            lus = ", ".join(f"{_letter(c)}='{t}'" for c, t in sorted(best.header_labels.items()))
+            raise ExcelReadError(
+                f"{spec.label} : colonne(s) introuvable(s) dans la feuille '{best.title}' "
+                f"(en-tetes ligne {best.header_row}) : {', '.join(best.missing)}.\n\n"
+                f"En-tetes lus : {lus}\n\n"
+                "Une colonne a sans doute ete renommee. Remettez le nom attendu "
+                f"({', '.join(best.missing)}) dans le fichier, ou prevenez le developpeur."
+            ) from None
         titles = [wanted] if wanted else list(spec.preferred_titles) + wb.sheetnames
         for title in titles:
             if title and title in wb.sheetnames:

@@ -311,6 +311,30 @@ class TestFichiers(BaseCase):
         self.assertEqual(self.cell(ws2, L_VD_EXISTANT, "Promoter"), "PROMO VD KENITRA")
         self.assertEqual(plan.stats.lignes_ajoutees, 1)
 
+    def _reference_avec_entete_store(self, nom: str) -> None:
+        wb = openpyxl.load_workbook(self.files["reference"])
+        wb["Feuil2"].cell(1, 9, nom)                          # colonne I = STORE
+        renommee = self.folder / f"REF_{nom.replace(' ', '_')}.xlsx"
+        wb.save(renommee)
+        self.files["reference"] = renommee
+
+    def test_colonne_store_nommee_pos(self):
+        """Liste promoteurs 09-2026 : la colonne du magasin s'appelle 'POS'."""
+        self._reference_avec_entete_store("POS")
+        plan, _ = self.run_pipeline()
+        self.assertEqual(plan.stats.stores_non_trouves, 1)    # seul 'Store Inconnu'
+        self.assertEqual(self.cell(self.sheet(), L_VD_EXISTANT, "Promoter"), "PROMO VD KENITRA")
+
+    def test_colonne_renommee_message_clair_jamais_de_repli(self):
+        """En-tetes lisibles mais STORE introuvable : arret + message, pas de lecture par position."""
+        self._reference_avec_entete_store("Enseigne XYZ")
+        with self.assertRaises(PipelineError) as ctx:
+            self.run_pipeline()
+        message = str(ctx.exception)
+        self.assertIn("STORE", message)
+        self.assertIn("Enseigne XYZ", message)
+        self.assertFalse(self.output.exists())
+
     def test_sources_jamais_modifiees(self):
         self.run_pipeline()
         for name, path in self.files.items():
