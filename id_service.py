@@ -21,7 +21,12 @@ Recherche du Store, dans cet ordre :
   2. nom du Store CONTENU dans le nom du fichier, avec des mots en plus
      "ASHIAMA-PANORAMIQUE-BRANDSHOP" contient "Ashiama Panoramique"
      -> utilise MAIS signale dans le rapport (sauf si un autre Store colle mieux).
-  3. nom tres proche (>= 85 %, nettement meilleur que le 2e candidat)
+  3. nom ecrit autrement, mais sans doute possible (signale "a controler") :
+     a. mots communs avec UN SEUL Store, dont un mot propre a ce Store
+        "CARREFOUR-MARRAKECH-MAZAR" -> Carrefour Al Mazar (MAZAR), "AERIA-MALL-BRANDSHOP" -> Ashiama Aeria mall
+     b. nom raccourci : "ESPACE-BADR" est dans "Espace Badr Bourgogne" ET "Espace Badr Bouskoura" ;
+        Bouskoura a deja ses propres fichiers -> c'est Bourgogne. Sinon : rien.
+  4. nom tres proche (>= 85 %, nettement meilleur que le 2e candidat)
      "Carrefour Berrachid" ~ "Carrefour Berrechid" -> utilise MAIS signale dans le rapport.
   Jamais de choix au hasard : 2 fichiers qui donnent 2 IDs differents -> rien ecrit.
 """
@@ -118,6 +123,7 @@ class IdService:
             self._by_store.setdefault(f.squashed, []).append(f)
         self.used: set[str] = set()                   # fichiers effectivement utilises
         self._connus: dict[str, frozenset[str]] = {}  # tous les Stores (Reference + fichier 2)
+        self._attribution: dict[str, tuple[str, str]] | None = None   # fichier -> (Store, explication)
 
     @classmethod
     def from_folder(cls, folder: str | Path) -> "IdService":
@@ -142,6 +148,7 @@ class IdService:
             cle = _squash(name)
             if cle:
                 self._connus[cle] = _mots(name)
+        self._attribution = None
 
     def describe(self) -> str:
         texte = f"{len(self.files)} fichier(s) avec un numero, {len(self._by_store)} Store(s)"
@@ -162,6 +169,54 @@ class IdService:
                     and len(mots_autre) >= len(mots) and mots_autre != mots:
                 return True
         return False
+
+    def _a_son_fichier(self, cle_store: str) -> bool:
+        """Ce Store a-t-il deja un fichier a son nom (identique ou contenu) ?"""
+        mots = self._connus[cle_store]
+        return any(cle == cle_store or (len(mots) >= MOTS_MINIMUM and mots <= fichiers[0].mots)
+                   for cle, fichiers in self._by_store.items())
+
+    def _attribuer(self) -> dict[str, tuple[str, str]]:
+        """Fichiers au nom ecrit autrement -> Store, seulement quand il n'y a aucun doute (regles 3a / 3b)."""
+        if self._attribution is not None:
+            return self._attribution
+        frequence: dict[str, int] = {}
+        for mots in self._connus.values():
+            for mot in mots:
+                frequence[mot] = frequence.get(mot, 0) + 1
+        attribution: dict[str, tuple[str, str]] = {}
+        for cle_fichier, fichiers in self._by_store.items():
+            if cle_fichier in self._connus:
+                continue                                              # nom identique : deja gere
+            mots_f = fichiers[0].mots
+            # 3a. mots communs avec un seul Store, dont au moins un mot propre a ce Store
+            meilleurs, record = [], 0
+            for cle, mots in self._connus.items():
+                communs = mots & mots_f
+                if len(communs) < MOTS_MINIMUM or 2 * len(communs) < len(mots):
+                    continue
+                if len(communs) > record:
+                    meilleurs, record = [(cle, communs)], len(communs)
+                elif len(communs) == record:
+                    meilleurs.append((cle, communs))
+            if len(meilleurs) == 1:
+                cle, communs = meilleurs[0]
+                propres = sorted(w.upper() for w in communs if frequence.get(w) == 1)
+                if propres:
+                    attribution[cle_fichier] = (cle, "nom du fichier different, mot propre a ce Store : "
+                                                + ", ".join(propres))
+                    continue
+            # 3b. nom raccourci contenu dans plusieurs Stores : on ecarte ceux qui ont deja leur fichier
+            if len(mots_f) >= MOTS_MINIMUM:
+                contenants = [cle for cle, mots in self._connus.items() if mots_f <= mots]
+                restants = [cle for cle in contenants if not self._a_son_fichier(cle)]
+                if len(contenants) >= 1 and len(restants) == 1:
+                    autres = [c for c in contenants if c not in restants]
+                    detail = "nom du fichier raccourci" + (
+                        f" (les autres Stores possibles ont deja leur fichier)" if autres else "")
+                    attribution[cle_fichier] = (restants[0], detail)
+        self._attribution = attribution
+        return attribution
 
     def _store_files(self, noms: list[str]) -> tuple[list[IdFile], str]:
         """Fichiers du Store : (fichiers, '' | 'exact' | description de l'approximation)."""
@@ -189,12 +244,22 @@ class IdService:
             return [], "plusieurs fichiers de Stores differents contiennent ce nom : " + ", ".join(
                 self._by_store[c][0].store for c in sorted(contenus))
 
-        # 3. nom tres proche (faute de frappe)
+        # 3. nom ecrit autrement mais sans doute possible (mots propres / nom raccourci)
+        attribues = [(cle_fichier, detail) for cle_fichier, (cle_store, detail) in self._attribuer().items()
+                     if cle_store in cles]
+        if attribues:
+            fichiers = [f for cle_fichier, _ in attribues for f in self._by_store[cle_fichier]]
+            return fichiers, attribues[0][1]
+
+        # 4. nom tres proche (faute de frappe)
         meilleur: tuple[float, str] | None = None
         second = 0.0
-        for cle_fichier in self._by_store:
+        nb_mots = {len(_mots(n)) for n in noms}
+        for cle_fichier, fichiers_store in self._by_store.items():
             if cle_fichier in self._connus and cle_fichier not in cles:
                 continue                                              # fichier d'un autre Store
+            if len(fichiers_store[0].mots) not in nb_mots:
+                continue          # "Carrefour Al Mazar" n'est pas "CARREFOUR ALMAZ" (autre magasin)
             score = max((SequenceMatcher(None, cle, cle_fichier).ratio() for cle in cles), default=0)
             if meilleur is None or score > meilleur[0]:
                 second = meilleur[0] if meilleur else 0.0

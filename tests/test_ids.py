@@ -136,6 +136,44 @@ class RegleIdTest(unittest.TestCase):
         ids = service("12_CARREFOUR-TANGER_VD_Part1.jpg")
         self.assertEqual(ids.lookup(["Carrefour"], "VD", {"VD"}).status, NOT_FOUND)
 
+    def test_octobre_nom_different_mot_propre(self):
+        ids = service("97_CARREFOUR-MARRAKECH-MAZAR_VD_Part1.jpg", "171_AERIA-MALL-BRANDSHOP_VD_Part1.jpg",
+                      "180_CARREFOUR-ALMAZ_VD-DA_Part1.jpeg")
+        ids.set_known_stores(["Carrefour Al Mazar", "Ashiama Aeria mall", "Ashiama Panoramique",
+                              "Carrefour Tanger", "Carrefour Almaz"])
+        result = ids.lookup(["Carrefour Al Mazar"], "VD", {"VD"})
+        self.assertEqual((result.status, result.value), (APPROX, "97"))
+        self.assertIn("MAZAR", result.reason)
+        self.assertEqual(ids.lookup(["Ashiama Aeria mall"], "VD", {"VD"}).value, "171")
+        self.assertEqual(ids.lookup(["Carrefour Almaz"], "VD", {"VD", "DA"}).value, "180VD")
+
+    def test_al_mazar_jamais_pris_pour_almaz(self):
+        """Autre magasin au nom tres proche : jamais confondu, meme sans autre fichier."""
+        ids = service("180_CARREFOUR-ALMAZ_VD-DA_Part1.jpeg")
+        ids.set_known_stores(["Carrefour Al Mazar"])
+        self.assertEqual(ids.lookup(["Carrefour Al Mazar"], "VD", {"VD"}).status, NOT_FOUND)
+
+    def test_nom_raccourci_par_elimination(self):
+        """'ESPACE-BADR' : Bourgogne ou Bouskoura ? Bouskoura a son fichier -> Bourgogne
+        (confirme par la saisie manuelle de septembre : 202 / 207)."""
+        ids = service("166_ESPACE-BADR_VD_Part1.jpg", "183_ESPACE-BADR_DA_Part1.jpg",
+                      "168_ESPACE-BADR-BOUSKOURA_VD_Part1.jpg", "172_ESPACE-BADR-BOUSKOURA_DA_Part1.jpg")
+        ids.set_known_stores(["Espace Badr Bourgogne", "Espace Badr Bouskoura"])
+        self.assertEqual(ids.lookup(["Espace Badr Bourgogne"], "VD", {"VD"}).value, "166")
+        self.assertEqual(ids.lookup(["Espace Badr Bourgogne"], "DA", {"DA"}).value, "183")
+        self.assertEqual(ids.lookup(["Espace Badr Bouskoura"], "VD", {"VD"}).value, "168")
+
+    def test_nom_raccourci_sans_elimination_rien(self):
+        ids = service("166_ESPACE-BADR_VD_Part1.jpg")
+        ids.set_known_stores(["Espace Badr Bourgogne", "Espace Badr Bouskoura"])
+        self.assertEqual(ids.lookup(["Espace Badr Bourgogne"], "VD", {"VD"}).status, NOT_FOUND)
+
+    def test_mots_de_chaine_seuls_jamais_suffisants(self):
+        """'ELECTRO BOUSFIHA AL QODS' ne va jamais a un autre Electro Boussfiha."""
+        ids = service("144_ELECTRO-BOUSFIHA-AL-QODS_VD-DA_Part1.jpg")
+        ids.set_known_stores(["Electro Boussfiha Tanger", "Electro Boussfiha Fes"])
+        self.assertEqual(ids.lookup(["Electro Boussfiha Tanger"], "VD", {"VD", "DA"}).status, NOT_FOUND)
+
     def test_deux_fichiers_contradictoires(self):
         ids = service("35-Store X DA.pdf", "36-Store X DA.pdf")
         self.assertEqual(ids.lookup(["Store X"], "DA", {"DA"}).status, AMBIGUOUS)

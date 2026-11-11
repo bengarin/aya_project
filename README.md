@@ -134,7 +134,12 @@ Separateurs `-`, `_` ou espace ; `VD-DA` = `VD+DA` ; `_Part1`, `_Part2`... et `(
 - Store reconnu meme ecrit autrement (majuscules, espaces, lettres doublees) : `ELECTROBOUSFIHA` = `Electro Boussfiha`.
 - Nom du Store **contenu** dans le nom du fichier avec des mots en plus (`ASHIAMA-PANORAMIQUE-BRANDSHOP`,
   `MIZA-ELECTRONIQUE-CASABLANCA`) : ID ecrit **et** signale `ID NOM APPROCHE`, sauf si un autre Store colle mieux.
-- Nom **approche** (>= 85 %, ex. `Berrachid` / `Berrechid`) : ID ecrit **et** signale `ID NOM APPROCHE` dans le rapport.
+- Nom **ecrit autrement mais sans doute possible** (signale `ID NOM APPROCHE`) :
+  mot propre a un seul Store (`CARREFOUR-MARRAKECH-MAZAR` -> Carrefour Al Mazar, `AERIA-MALL-BRANDSHOP` -> Ashiama
+  Aeria mall) ; nom raccourci (`ESPACE-BADR` -> Espace Badr Bourgogne, car Bouskoura a deja ses fichiers ;
+  confirme par la saisie manuelle de septembre 202 / 207). Les mots de chaine seuls (ELECTRO BOUSFIHA, ASWAK
+  ASSALAM...) ne suffisent jamais.
+- Nom **approche** (>= 85 %, ex. `Berrachid` / `Berrechid`) : ID ecrit **et** signale `ID NOM APPROCHE` dans le rapport. Meme nombre de mots exige : `Carrefour Al Mazar` n'est jamais `CARREFOUR ALMAZ`.
 - Un fichier non utilise est liste avec la facon dont son nom a ete lu (ID, Store, division) : on voit tout de suite le probleme.
 - Store absent du dossier : IDAYA existant **conserve** (`ID NON TROUVE` dans le rapport).
 - 2 fichiers qui donnent 2 IDs differents pour le meme Store + Division : **rien ecrit**, signale.
@@ -288,7 +293,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-77 tests (39 regles metier + 11 fichiers optionnels / mal places + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+82 tests (39 regles metier + 11 fichiers optionnels / mal places + 28 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
