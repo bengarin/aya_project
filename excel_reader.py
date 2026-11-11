@@ -37,6 +37,21 @@ class ExcelReadError(Exception):
     """Erreur de lecture claire, affichable telle quelle dans l'interface."""
 
 
+class WrongFileError(ExcelReadError):
+    """Le fichier choisi n'est pas du bon type (ex. la BDD mise a la place de la Reference)."""
+
+    def __init__(self, message: str, detected: str) -> None:
+        super().__init__(message)
+        self.detected = detected          # "reference" | "target" | "kam"
+
+
+KIND_LABELS = {
+    "reference": "un fichier Reference (liste des promoteurs)",
+    "target": "un fichier a traiter (BDD, feuille BDD PROMOTERS MONTH)",
+    "kam": "un fichier Affectation KAM",
+}
+
+
 # ---------------------------------------------------------------------------
 # Description des colonnes attendues dans chaque fichier
 # ---------------------------------------------------------------------------
@@ -276,6 +291,43 @@ def analyze_sheet(ws, spec: SheetSpec) -> SheetLayout:
     )
 
 
+def _has_headers(ws, spec: SheetSpec) -> bool:
+    """Controle rapide : une ligne du haut contient-elle TOUTES les colonnes obligatoires ?"""
+    max_col = min(ws.max_column or 1, 80)
+    for row in range(1, min(ws.max_row or 1, HEADER_SCAN_ROWS) + 1):
+        columns = _match_columns({c: ws.cell(row, c).value for c in range(1, max_col + 1)}, spec)
+        if all(name in columns for name in spec.required):
+            return True
+    return False
+
+
+def kind_of_workbook(wb) -> str | None:
+    """Type du classeur. La BDD passe en PREMIER : elle contient aussi toutes les
+    colonnes d'une Reference (Store, Promoter, Division, DAY...) et d'un fichier KAM."""
+    for kind, spec in (("target", TARGET_SPEC), ("reference", REFERENCE_SPEC), ("kam", KAM_SPEC)):
+        if any(_has_headers(ws, spec) for ws in wb.worksheets):
+            return kind
+    return None
+
+
+def detect_kind(path: str | Path) -> str | None:
+    try:
+        wb = load_workbook(path, data_only=True, read_only=False)
+    except Exception:                                       # pragma: no cover - fichier illisible
+        return None
+    try:
+        return kind_of_workbook(wb)
+    finally:
+        wb.close()
+
+
+def _verifier_type(wb, attendu: str, label: str) -> None:
+    """Refuse un fichier d'un autre type, au lieu de le lire de travers."""
+    detecte = kind_of_workbook(wb)
+    if detecte is not None and detecte != attendu:
+        raise WrongFileError(f"{label} : ce fichier est {KIND_LABELS[detecte]}.", detecte)
+
+
 def analyze_workbook(wb, spec: SheetSpec) -> list[SheetLayout]:
     """Analyse toutes les feuilles et classe les meilleures candidates en premier.
 
@@ -397,9 +449,15 @@ def load_reference(path: str | Path, sheet: str | None = None) -> ReferenceData:
     path = Path(path)
     wb = load_workbook(path, data_only=True, read_only=False)
     try:
+        if kind_of_workbook(wb) == "target":
+            _verifier_type(wb, "reference", "Fichier 1 - Reference")
         sheet_names = wb.sheetnames
         layouts = analyze_workbook(wb, REFERENCE_SPEC)
-        layout = pick_layout_or_positional(wb, layouts, REFERENCE_SPEC, sheet)
+        try:
+            layout = pick_layout_or_positional(wb, layouts, REFERENCE_SPEC, sheet)
+        except ExcelReadError:
+            _verifier_type(wb, "reference", "Fichier 1 - Reference")   # fichier KAM mis a la place ?
+            raise
         ws = wb[layout.title]
         rows: list[ReferenceRow] = []
         by_store: dict[str, list[ReferenceRow]] = {}
@@ -466,6 +524,8 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
     path = Path(path)
     wb = load_workbook(path, data_only=True, read_only=False)
     try:
+        if kind_of_workbook(wb) == "target":
+            _verifier_type(wb, "kam", "Fichier 3 - Affectation KAM")
         sheet_names = wb.sheetnames
         layouts_all = [analyze_sheet(wb[name], KAM_SPEC) for name in sheet_names]
         usable = [l for l in layouts_all if l.is_valid and (sheets is None or l.title in sheets)]
@@ -478,6 +538,7 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
                 if layout is not None and layout.data_rows > 0:
                     usable.append(layout)
         if not usable:
+            _verifier_type(wb, "kam", "Fichier 3 - Affectation KAM")   # Reference mise a la place ?
             missing = layouts_all[0].missing if layouts_all else KAM_SPEC.required
             raise ExcelReadError(
                 "Fichier 3 - Affectation KAM : aucune feuille avec les colonnes obligatoires "
@@ -563,7 +624,11 @@ def load_target(path: str | Path, sheet: str | None = None) -> TargetData:
     warnings: list[str] = []
     try:
         layouts = analyze_workbook(wb, TARGET_SPEC)
-        layout = pick_layout_or_positional(wb, layouts, TARGET_SPEC, sheet)
+        try:
+            layout = pick_layout_or_positional(wb, layouts, TARGET_SPEC, sheet)
+        except ExcelReadError:
+            _verifier_type(wb, "target", "Fichier 2 - BDD a traiter")   # Reference / KAM mis a la place ?
+            raise
         ws = wb[layout.title]
 
         cached: dict[tuple[int, int], object] = {}

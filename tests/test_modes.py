@@ -125,6 +125,37 @@ class ModesTest(unittest.TestCase):
         self.assertEqual(plan.stats.lignes_ajoutees, 1)
         self.assertIn("Non touche : KAM, ID", selection.mode())
 
+    # -- fichiers mis sur la mauvaise ligne ------------------------------
+    def charger(self, **choix) -> PipelineError:
+        session = Session(Selection(**choix))
+        try:
+            with self.assertRaises(PipelineError) as ctx:
+                session.load()
+            return ctx.exception
+        finally:
+            session.close()
+
+    def test_reference_et_bdd_inversees(self):
+        """Cas reel : la BDD a des colonnes Store/Promoter/DAY, elle passait pour une Reference."""
+        err = self.charger(reference=self.files["target"], target=self.files["reference"],
+                           kam=self.files["kam"])
+        self.assertEqual(err.swap, ("reference", "target"))
+        self.assertIn("inverses", str(err))
+        self.assertFalse(self.output.exists())
+
+    def test_reference_et_kam_inverses(self):
+        err = self.charger(reference=self.files["kam"], target=self.files["target"],
+                           kam=self.files["reference"])
+        self.assertEqual(err.swap, ("reference", "kam"))
+
+    def test_bdd_sur_la_ligne_kam_seule(self):
+        err = self.charger(target=self.files["reference"], kam=self.files["target"])
+        self.assertIn("Fichiers mal places", str(err))
+
+    def test_meme_fichier_sur_deux_lignes(self):
+        with self.assertRaises(PipelineError):
+            Selection(target=self.files["target"], kam=self.files["target"]).validate()
+
     def test_sans_reference_doublon_jamais_choisi(self):
         wb = openpyxl.load_workbook(self.files["target"])
         ws = wb[SHEET]

@@ -298,8 +298,8 @@ class App:
         grid.pack(fill="x", padx=16, pady=(0, 4))
 
         rows = (
-            ("Fichier a traiter", "OBLIGATOIRE", self.var_target, self.var_target_sheet, "target"),
             ("Fichier Reference", "optionnel", self.var_ref, self.var_ref_sheet, "reference"),
+            ("Fichier a traiter", "OBLIGATOIRE", self.var_target, self.var_target_sheet, "target"),
             ("Affectation KAM", "optionnel", self.var_kam, self.var_kam_sheet, "kam"),
         )
         for index, (label, hint, path_var, sheet_var, kind) in enumerate(rows):
@@ -516,6 +516,21 @@ class App:
         self.var_status.set(f"Dossier des IDs : {Path(path).name} (IDAYA lu dans les noms de fichiers)")
         self._refresh_step1()
 
+    def _echanger(self, a: str, b: str) -> None:
+        """Echange 2 fichiers mal places (ex. Reference et fichier a traiter inverses)."""
+        chemins = {"reference": self.var_ref, "target": self.var_target, "kam": self.var_kam}
+        feuilles = {"reference": self.var_ref_sheet, "target": self.var_target_sheet, "kam": self.var_kam_sheet}
+        va, vb = chemins[a].get(), chemins[b].get()
+        chemins[a].set(vb)
+        chemins[b].set(va)
+        for kind in (a, b):
+            feuilles[kind].set(AUTO)
+            if chemins[kind].get():
+                self._fill_sheets(kind, chemins[kind].get())
+        self._save_config()
+        self._refresh_step1()
+        self.var_status.set("Fichiers echanges.")
+
     def clear_source(self, kind: str) -> None:
         """Retire un fichier optionnel : ses colonnes ne seront pas touchees."""
         variables = {"reference": self.var_ref, "kam": self.var_kam, "ids": self.var_ids}
@@ -599,7 +614,7 @@ class App:
             plan = self.session.analyze(lambda m, v: self.queue.put(("progress", m, v)))
             self.queue.put(("analyzed", plan))
         except PipelineError as exc:
-            self.queue.put(("error", str(exc)))
+            self.queue.put(("error", str(exc), exc.swap))
         except Exception as exc:                                # pragma: no cover
             logging.exception("Erreur inattendue pendant le traitement")
             self.queue.put(("error", f"Erreur inattendue :\n{exc}\n\n{traceback.format_exc(limit=3)}"))
@@ -630,7 +645,7 @@ class App:
             )
             self.queue.put(("written", result, reports))
         except PipelineError as exc:
-            self.queue.put(("error", str(exc)))
+            self.queue.put(("error", str(exc), exc.swap))
         except Exception as exc:                                # pragma: no cover
             logging.exception("Erreur inattendue pendant le traitement")
             self.queue.put(("error", f"Erreur inattendue :\n{exc}\n\n{traceback.format_exc(limit=3)}"))
@@ -671,7 +686,14 @@ class App:
                     self._set_busy(False)
                     _set_progress(self.progress, 0)
                     self.var_status.set("Traitement interrompu.")
-                    messagebox.showerror("Erreur", message[1])
+                    swap = message[2] if len(message) > 2 else None
+                    if swap and messagebox.askyesno(
+                            "Fichiers inverses", message[1] + "\n\nLes echanger automatiquement "
+                            "et relancer l'analyse ?"):
+                        self._echanger(*swap)
+                        self.on_analyze()
+                    elif not swap:
+                        messagebox.showerror("Erreur", message[1])
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)

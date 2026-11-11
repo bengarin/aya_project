@@ -29,6 +29,13 @@ Progress = Callable[[str, float], None]        # (message, avancement 0..1)
 class PipelineError(Exception):
     """Erreur metier destinee a etre affichee a l'utilisateur."""
 
+    def __init__(self, message: str, swap: tuple[str, str] | None = None) -> None:
+        super().__init__(message)
+        self.swap = swap          # 2 fichiers simplement inverses : ("reference", "target")...
+
+
+LIGNES = {"reference": "Fichier Reference", "target": "Fichier a traiter", "kam": "Affectation KAM"}
+
 
 @dataclass
 class Selection:
@@ -75,6 +82,9 @@ class Selection:
                 "- Fichier Reference (promoteurs, DAY, lignes manquantes...)\n"
                 "- Affectation KAM (colonne KAM)\n"
                 "- Dossier des IDs (colonne ID)")
+        choisis = [Path(str(v)).resolve() for v in (self.reference, self.target, self.kam) if v]
+        if len(choisis) != len(set(choisis)):
+            raise PipelineError("Le meme fichier est choisi sur 2 lignes. Chaque ligne attend un fichier different.")
         for label, value in (
             ("Fichier 1", self.reference), ("Fichier 2", self.target), ("Fichier 3", self.kam)
         ):
@@ -128,14 +138,17 @@ class Session:
         self.selection.validate()
         self.close()
         self._applied = False
+        slot = ""
         try:
             reference = None
+            slot = "reference"
             if self.selection.reference:
                 if progress:
                     progress("Lecture du fichier Reference...", 0.05)
                 reference = reader.load_reference(self.selection.reference, self.selection.reference_sheet)
 
             kam = None
+            slot = "kam"
             if self.selection.kam:
                 if progress:
                     progress("Lecture du fichier Affectation KAM...", 0.15)
@@ -143,6 +156,7 @@ class Session:
 
             if progress:
                 progress("Lecture du fichier a traiter (peut prendre quelques secondes)...", 0.25)
+            slot = "target"
             target = reader.load_target(self.selection.target, self.selection.target_sheet)
 
             ids = None
@@ -150,6 +164,8 @@ class Session:
                 if progress:
                     progress("Lecture du dossier des IDs...", 0.30)
                 ids = IdService.from_folder(self.selection.ids_folder)
+        except reader.WrongFileError as exc:
+            raise self._fichiers_mal_places(slot, exc.detected) from exc
         except ExcelReadError as exc:
             raise PipelineError(str(exc)) from exc
         except Exception as exc:                            # pragma: no cover - fichier corrompu
@@ -200,6 +216,23 @@ class Session:
         if progress:
             progress("Fichiers charges.", 0.35)
         return self.data
+
+    def _fichiers_mal_places(self, slot: str, detecte: str) -> PipelineError:
+        """Message clair quand un fichier est sur la mauvaise ligne (ex. BDD et Reference inverses)."""
+        choisis = {"reference": self.selection.reference, "target": self.selection.target,
+                   "kam": self.selection.kam}
+        lignes = [f"- '{Path(str(choisis[slot])).name}' est sur la ligne '{LIGNES[slot]}', "
+                  f"mais c'est {reader.KIND_LABELS[detecte]}."]
+        swap = None
+        autre = choisis.get(detecte)
+        if autre and reader.detect_kind(autre) == slot:
+            lignes.append(f"- '{Path(str(autre)).name}' est sur la ligne '{LIGNES[detecte]}', "
+                          f"mais c'est {reader.KIND_LABELS[slot]}.")
+            swap = (slot, detecte)
+            conseil = "Les 2 fichiers sont inverses : echangez-les."
+        else:
+            conseil = f"Mettez ce fichier sur la ligne '{LIGNES[detecte]}'."
+        return PipelineError("Fichiers mal places :\n\n" + "\n".join(lignes) + "\n\n" + conseil, swap=swap)
 
     # ------------------------------------------------------------------
     def analyze(self, progress: Progress | None = None) -> Plan:

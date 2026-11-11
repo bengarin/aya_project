@@ -60,6 +60,11 @@ Sans Reference : aucune ligne creee, aucune autre colonne touchee ; Store vide -
 Division1 autre que VD/DA, ou meme Store + Division sur 2 lignes -> **A VERIFIER** (ligne intacte).
 La phrase verte sous les fichiers dit toujours ce qui sera mis a jour.
 
+**Fichier sur la mauvaise ligne** (ex. Reference et BDD inverses) : le logiciel reconnait le type
+de chaque fichier (la BDD par sa feuille `BDD PROMOTERS MONTH` : Division1, KAM, Column1...),
+s'arrete avant tout traitement, dit quel fichier est ou, et propose de les **echanger
+automatiquement**. Le meme fichier sur 2 lignes est refuse.
+
 ## 2. Structure attendue des fichiers
 
 Les colonnes sont reconnues **par leur nom** (majuscules, accents et espaces ignores).
@@ -283,7 +288,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-73 tests (39 regles metier + 7 fichiers optionnels + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+77 tests (39 regles metier + 11 fichiers optionnels / mal places + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.
