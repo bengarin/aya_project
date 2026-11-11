@@ -32,7 +32,11 @@ class PipelineError(Exception):
 
 @dataclass
 class Selection:
-    """Les 3 fichiers choisis par l'utilisateur (+ feuilles forcees si besoin)."""
+    """Les fichiers choisis par l'utilisateur (+ feuilles forcees si besoin).
+
+    Seul le fichier 2 (BDD a traiter) est OBLIGATOIRE. Reference, KAM et dossier des
+    IDs sont optionnels (au moins un) : seules les colonnes qu'ils alimentent changent.
+    """
 
     reference: str | Path | None = None
     target: str | Path | None = None
@@ -42,19 +46,40 @@ class Selection:
     kam_sheets: list[str] | None = None
     ids_folder: str | Path | None = None       # OPTIONNEL : dossier des IDs (Etat de vente)
 
+    def mode(self) -> str:
+        """Phrase simple : ce qui sera mis a jour avec les fichiers choisis."""
+        parts = []
+        if self.reference:
+            parts.append("colonnes de la Reference (Promoter, ID Promoter, Code Store, DAY, City...) "
+                         "+ lignes manquantes")
+        if self.kam:
+            parts.append("KAM")
+        if self.ids_folder:
+            parts.append("ID")
+        if not parts:
+            return ""
+        texte = "Mis a jour : " + " + ".join(parts)
+        intacts = [nom for nom, choisi in (("KAM", self.kam), ("ID", self.ids_folder)) if not choisi]
+        if not self.reference:
+            texte += ". Sans Reference : aucune autre colonne touchee, aucune ligne creee"
+        if intacts:
+            texte += ". Non touche : " + ", ".join(intacts)
+        return texte + "."
+
     def validate(self) -> None:
-        missing = [
-            label for label, value in (
-                ("Fichier 1 (Reference)", self.reference),
-                ("Fichier 2 (BDD a traiter)", self.target),
-                ("Fichier 3 (Affectation KAM)", self.kam),
-            ) if not value
-        ]
-        if missing:
-            raise PipelineError("Fichier(s) manquant(s) : " + ", ".join(missing))
+        if not self.target:
+            raise PipelineError("Fichier 2 (BDD a traiter) manquant : c'est le seul fichier obligatoire.")
+        if not (self.reference or self.kam or self.ids_folder):
+            raise PipelineError(
+                "Choisissez au moins une source en plus du fichier a traiter :\n"
+                "- Fichier Reference (promoteurs, DAY, lignes manquantes...)\n"
+                "- Affectation KAM (colonne KAM)\n"
+                "- Dossier des IDs (colonne ID)")
         for label, value in (
             ("Fichier 1", self.reference), ("Fichier 2", self.target), ("Fichier 3", self.kam)
         ):
+            if not value:
+                continue
             path = Path(str(value))
             if not path.exists():
                 raise PipelineError(f"{label} introuvable : {path}")
@@ -66,19 +91,20 @@ class Selection:
 
 @dataclass
 class LoadedData:
-    reference: ReferenceData
+    reference: ReferenceData | None
     target: TargetData
-    kam: KamService
+    kam: KamService | None
     warnings: list[str] = field(default_factory=list)
     ids: IdService | None = None
 
     def describe(self) -> str:
         lines = [
-            "Fichier 1 (Reference)      : " + self.reference.layout.describe(),
+            "Fichier 1 (Reference)      : "
+            + (self.reference.layout.describe() if self.reference else "non choisi (colonnes Reference non touchees)"),
             "Fichier 2 (BDD a traiter)  : " + self.target.layout.describe(),
             "Fichier 3 (Affectation KAM): "
-            + ", ".join(f"feuille '{l.title}' ({l.data_rows} lignes)" for l in self.kam.data.layouts)
-            + f" | {self.kam.summary()}",
+            + (", ".join(f"feuille '{l.title}' ({l.data_rows} lignes)" for l in self.kam.data.layouts)
+               + f" | {self.kam.summary()}" if self.kam else "non choisi (colonne KAM non touchee)"),
         ]
         if self.ids is not None:
             lines.append("Dossier des IDs            : " + self.ids.describe())
@@ -103,13 +129,17 @@ class Session:
         self.close()
         self._applied = False
         try:
-            if progress:
-                progress("Lecture du fichier Reference...", 0.05)
-            reference = reader.load_reference(self.selection.reference, self.selection.reference_sheet)
+            reference = None
+            if self.selection.reference:
+                if progress:
+                    progress("Lecture du fichier Reference...", 0.05)
+                reference = reader.load_reference(self.selection.reference, self.selection.reference_sheet)
 
-            if progress:
-                progress("Lecture du fichier Affectation KAM...", 0.15)
-            kam = KamService(reader.load_kam(self.selection.kam, self.selection.kam_sheets))
+            kam = None
+            if self.selection.kam:
+                if progress:
+                    progress("Lecture du fichier Affectation KAM...", 0.15)
+                kam = KamService(reader.load_kam(self.selection.kam, self.selection.kam_sheets))
 
             if progress:
                 progress("Lecture du fichier a traiter (peut prendre quelques secondes)...", 0.25)
@@ -132,13 +162,15 @@ class Session:
                 "Elements du fichier 2 non recopiables par openpyxl (ils seront absents du resultat) : "
                 + ", ".join(lost) + ". Les donnees, formules, couleurs, tableaux et filtres sont conserves."
             )
-        if kam.data.ignored_sheets:
+        if kam is not None and kam.data.ignored_sheets:
             warnings.append(
                 "Fichier 3 : feuille(s) ignoree(s) : "
                 + ", ".join(f"'{t}'" for t in kam.data.ignored_sheets)
                 + " (le KAM est lu uniquement dans les feuilles VD et DA, Store + Division)."
             )
-        if not kam.divisions:
+        if kam is None:
+            pass
+        elif not kam.divisions:
             warnings.append(
                 "Le fichier 3 ne contient aucune feuille 'VD' / 'DA' : le KAM ne peut pas etre "
                 "cherche par Store + Division comme l'exigent les regles."
@@ -148,8 +180,9 @@ class Session:
                 f"Le fichier 3 ne contient qu'une feuille de division ({kam.divisions[0]}) : "
                 "les Stores de l'autre division n'auront pas de KAM (colonne laissee vide)."
             )
-        for layout, label in ((reference.layout, "Fichier 1"), (target.layout, "Fichier 2")):
-            if layout.positional:
+        for layout, label in ((reference.layout if reference else None, "Fichier 1"),
+                              (target.layout, "Fichier 2")):
+            if layout is not None and layout.positional:
                 warnings.append(
                     f"{label} : en-tetes non reconnus par leur nom, les colonnes ont ete prises "
                     f"par POSITION sur la feuille '{layout.title}' (ligne d'en-tetes "
@@ -200,7 +233,7 @@ class Session:
 
         if progress:
             progress("Ecriture du fichier resultat...", 0.1)
-        sources = [Path(str(p)) for p in (self.selection.reference, self.selection.target, self.selection.kam)]
+        sources = [Path(str(p)) for p in (self.selection.reference, self.selection.target, self.selection.kam) if p]
         try:
             result = apply_plan(
                 target=self.data.target, plan=self.plan, output_path=output_path,
@@ -230,9 +263,11 @@ class Session:
         lines = [
             "AUTOMATISATION EXCEL - AYA",
             f"Logiciel                             : {APP_NAME} {VERSION} - {CREDIT_ASCII}",
-            f"Fichier 1 (Reference, lecture seule) : {self.selection.reference}",
+            f"Fichier 1 (Reference, lecture seule) : {self.selection.reference or '(non choisi)'}",
             f"Fichier 2 (BDD a traiter)            : {self.selection.target}",
-            f"Fichier 3 (Affectation KAM)          : {self.selection.kam}",
+            f"Fichier 3 (Affectation KAM)          : {self.selection.kam or '(non choisi)'}",
+            f"Dossier des IDs                      : {self.selection.ids_folder or '(non choisi)'}",
+            self.selection.mode(),
         ]
         if self.data:
             lines.append(self.data.describe())

@@ -36,12 +36,29 @@ Mode ligne de commande (automatisation / tests) :
 
 ```bash
 python main.py --cli -r Reference.xlsx -t BDD.xlsx -k KAM.xlsx -o Resultat.xlsx
+python main.py --cli -t BDD.xlsx -k KAM.xlsx          # seulement la colonne KAM
 python main.py --cli ... --preview          # analyse seule, aucun fichier ecrit
 python main.py --cli ... --auto-idaya       # numerote IDAYA sur les lignes creees
 python main.py --cli ... --ids-dir "Etat de vente"   # IDAYA lu dans les noms de fichiers
 ```
 
 ---
+
+## 1 bis. Quels fichiers choisir ?
+
+**Seul le fichier a traiter (BDD) est obligatoire.** On ajoute ce que l'on veut mettre a jour
+(au moins un) ; le bouton **Retirer** enleve un fichier optionnel :
+
+| Fichiers choisis | Ce qui change dans la BDD |
+|---|---|
+| BDD + Reference | colonnes de la Reference (Promoter, ID Promoter, Code Store, DAY, City, Division, Column1) + lignes manquantes. **KAM et ID non touches** (ligne creee : KAM = `#`) |
+| BDD + Affectation KAM | **seulement la colonne KAM** (Store + Division1 de chaque ligne) |
+| BDD + Dossier des IDs | **seulement la colonne ID** |
+| combinaison | l'effet de chacun ; BDD + Reference + KAM (+ IDs) = traitement complet |
+
+Sans Reference : aucune ligne creee, aucune autre colonne touchee ; Store vide -> ligne rouge ;
+Division1 autre que VD/DA, ou meme Store + Division sur 2 lignes -> **A VERIFIER** (ligne intacte).
+La phrase verte sous les fichiers dit toujours ce qui sera mis a jour.
 
 ## 2. Structure attendue des fichiers
 
@@ -266,7 +283,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-66 tests (39 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+73 tests (39 regles metier + 7 fichiers optionnels + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

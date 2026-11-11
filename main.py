@@ -34,9 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"{APP_NAME} - traitement BDD commissions (Reference + BDD + Affectation KAM). {CREDIT_ASCII}",
     )
     parser.add_argument("--cli", action="store_true", help="traitement en ligne de commande (sans fenetre)")
-    parser.add_argument("-r", "--reference", help="Fichier 1 : Reference (lecture seule)")
-    parser.add_argument("-t", "--target", help="Fichier 2 : BDD a traiter")
-    parser.add_argument("-k", "--kam", help="Fichier 3 : Affectation des KAM")
+    parser.add_argument("-r", "--reference", help="OPTIONNEL - Fichier 1 : Reference (lecture seule)")
+    parser.add_argument("-t", "--target", help="OBLIGATOIRE - Fichier 2 : BDD a traiter")
+    parser.add_argument("-k", "--kam", help="OPTIONNEL - Fichier 3 : Affectation des KAM")
     parser.add_argument("-o", "--output", help="Fichier resultat (cree, jamais ecrase sur les sources)")
     parser.add_argument("--reference-sheet", help="forcer la feuille du fichier 1")
     parser.add_argument("--target-sheet", help="forcer la feuille du fichier 2")
@@ -69,6 +69,7 @@ def run_cli(args) -> int:
 
     try:
         data = session.load(progress)
+        print("\n" + selection.mode())
         print("\n--- Colonnes detectees ---")
         print(data.describe())
         for warning in data.warnings:
@@ -146,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     app_paths.setup_logging()
     _install_error_hooks()
     args = build_parser().parse_args(argv)
-    if args.cli or any([args.reference, args.target, args.kam]):
+    if args.cli or any([args.reference, args.target, args.kam, args.ids_dir]):
         return run_cli(args)
     try:
         from gui import launch

@@ -221,6 +221,7 @@ class App:
         self.var_target = tk.StringVar()
         self.var_kam = tk.StringVar()
         self.var_ids = tk.StringVar()          # dossier des IDs (optionnel)
+        self.var_mode = tk.StringVar(value="")  # ce qui sera mis a jour avec les fichiers choisis
         self.var_ref_sheet = tk.StringVar(value=AUTO)
         self.var_target_sheet = tk.StringVar(value=AUTO)
         self.var_kam_sheet = tk.StringVar(value=AUTO)
@@ -275,7 +276,7 @@ class App:
         header.pack(fill="x", pady=(0, 10))
         tk.Label(header, text=APP_TITLE, font=FONT_TITLE, bg=C["bg"],
                  fg=C["primary"]).pack(side="left")
-        tk.Label(header, text="  Reference (jamais modifiee)  +  BDD a traiter  +  Affectation KAM",
+        tk.Label(header, text="  BDD a traiter  +  au choix : Reference, KAM, IDs",
                  font=FONT, bg=C["bg"], fg=C["muted"]).pack(side="left")
 
         # Barre du bas (packee AVANT les etapes : toujours visible, meme fenetre reduite)
@@ -292,14 +293,14 @@ class App:
     def _build_step1(self, parent) -> None:
         card = self._card(parent)
         self._step_header(card, 1, "Choisir les fichiers",
-                          "la feuille est detectee toute seule")
+                          "seul le fichier a traiter est obligatoire")
         grid = tk.Frame(card, bg=C["card"])
-        grid.pack(fill="x", padx=16, pady=(0, 14))
+        grid.pack(fill="x", padx=16, pady=(0, 4))
 
         rows = (
-            ("Fichier Reference", "jamais modifie", self.var_ref, self.var_ref_sheet, "reference"),
-            ("Fichier a traiter", "le seul modifie", self.var_target, self.var_target_sheet, "target"),
-            ("Affectation KAM", "feuilles VD / DA", self.var_kam, self.var_kam_sheet, "kam"),
+            ("Fichier a traiter", "OBLIGATOIRE", self.var_target, self.var_target_sheet, "target"),
+            ("Fichier Reference", "optionnel", self.var_ref, self.var_ref_sheet, "reference"),
+            ("Affectation KAM", "optionnel", self.var_kam, self.var_kam_sheet, "kam"),
         )
         for index, (label, hint, path_var, sheet_var, kind) in enumerate(rows):
             tk.Label(grid, text=label, font=FONT_BOLD, bg=C["card"], fg=C["ink"],
@@ -316,6 +317,9 @@ class App:
             combo.grid(row=index, column=4, padx=(6, 0))
             combo.bind("<<ComboboxSelected>>", lambda _e: self._reset_analysis())
             self.sheet_combos[kind] = combo
+            if kind != "target":
+                _button(grid, "Retirer", lambda k=kind: self.clear_source(k),
+                        kind="normal", width=80).grid(row=index, column=5, padx=(6, 0))
 
         # Dossier des IDs (OPTIONNEL) : IDAYA lu dans les noms de fichiers "35-Store DA.pdf"
         ligne = len(rows)
@@ -328,9 +332,13 @@ class App:
         self.path_entries["ids"] = entry
         _button(grid, "Parcourir", self.choose_ids_folder,
                 kind="normal", width=110).grid(row=ligne, column=3, padx=4)
-        _button(grid, "Sans dossier", self.clear_ids_folder,
-                kind="normal", width=110).grid(row=ligne, column=4, padx=(6, 0), sticky="w")
+        _button(grid, "Retirer", lambda: self.clear_source("ids"),
+                kind="normal", width=80).grid(row=ligne, column=5, padx=(6, 0))
         grid.grid_columnconfigure(2, weight=1)
+
+        # Ce que le logiciel va faire avec les fichiers choisis (mis a jour a chaque choix)
+        tk.Label(card, textvariable=self.var_mode, font=FONT_BOLD, bg=C["card"], fg=C["primary"],
+                 anchor="w", justify="left", wraplength=1050).pack(fill="x", padx=16, pady=(4, 12))
 
     # ------------------------------------------------------------------
     def _build_step2(self, parent) -> None:
@@ -506,18 +514,35 @@ class App:
         self._save_config()
         self._reset_analysis()
         self.var_status.set(f"Dossier des IDs : {Path(path).name} (IDAYA lu dans les noms de fichiers)")
+        self._refresh_step1()
 
-    def clear_ids_folder(self) -> None:
-        if not self.var_ids.get():
+    def clear_source(self, kind: str) -> None:
+        """Retire un fichier optionnel : ses colonnes ne seront pas touchees."""
+        variables = {"reference": self.var_ref, "kam": self.var_kam, "ids": self.var_ids}
+        noms = {"reference": "Sans Reference : colonnes de la Reference non touchees, aucune ligne creee.",
+                "kam": "Sans fichier KAM : la colonne KAM ne sera pas modifiee.",
+                "ids": "Sans dossier des IDs : la colonne ID ne sera pas modifiee."}
+        if not variables[kind].get():
             return
-        self.var_ids.set("")
+        variables[kind].set("")
+        if kind in self.sheet_combos:
+            {"reference": self.var_ref_sheet, "kam": self.var_kam_sheet}[kind].set(AUTO)
+            self.sheet_combos[kind].configure(values=[AUTO])
         self._save_config()
         self._reset_analysis()
-        self.var_status.set("Sans dossier des IDs : la colonne IDAYA ne sera pas modifiee.")
+        self.var_status.set(noms[kind])
+        self._refresh_step1()
 
     def _refresh_step1(self) -> None:
-        pret = all(v.get().strip() for v in (self.var_ref, self.var_target, self.var_kam))
-        self._mark_step(1, pret)
+        selection = self._selection()
+        sources = selection.reference or selection.kam or selection.ids_folder
+        if not selection.target:
+            self.var_mode.set("Choisissez le fichier a traiter (obligatoire).")
+        elif not sources:
+            self.var_mode.set("Ajoutez au moins un fichier : Reference, Affectation KAM ou Dossier des IDs.")
+        else:
+            self.var_mode.set(selection.mode())
+        self._mark_step(1, bool(selection.target and sources))
 
     # ------------------------------------------------------------------
     def _selection(self) -> Selection:

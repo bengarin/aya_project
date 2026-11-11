@@ -104,6 +104,8 @@ class Stats:
     kam_non_trouves: int = 0
     duplicates_evites: int = 0
     a_verifier: int = 0
+    ref_actif: bool = True            # un fichier Reference a ete fourni
+    kam_actif: bool = True            # un fichier KAM a ete fourni
     ids_actifs: bool = False          # un dossier des IDs a ete fourni
     ids_trouves: int = 0
     ids_approches: int = 0
@@ -116,10 +118,10 @@ class Stats:
             ("Lignes deja conformes", self.lignes_conformes),
             ("Lignes ajoutees", self.lignes_ajoutees),
             ("Lignes Store vide", self.lignes_store_vide),
-            ("Stores non trouves", self.stores_non_trouves),
+        ] + ([("Stores non trouves", self.stores_non_trouves)] if self.ref_actif else []) + ([
             ("KAM trouves", self.kam_trouves),
             ("KAM non trouves", self.kam_non_trouves),
-            ("Duplicates evites", self.duplicates_evites),
+        ] if self.kam_actif else []) + ([("Duplicates evites", self.duplicates_evites)] if self.ref_actif else []) + [
             ("A verifier", self.a_verifier),
         ] + ([
             ("IDs trouves (dossier)", self.ids_trouves),
@@ -144,9 +146,9 @@ class Plan:
 class Processor:
     def __init__(
         self,
-        reference: ReferenceData,
+        reference: ReferenceData | None,
         target: TargetData,
-        kam: KamService,
+        kam: KamService | None,
         options: Options | None = None,
         logger: ProcessLogger | None = None,
         ids: IdService | None = None,
@@ -159,11 +161,12 @@ class Processor:
         self.plan = Plan(logger=self.log)
         self.ids = ids if ids is not None and "IDAYA" in target.layout.columns else None
         self.plan.stats.ids_actifs = self.ids is not None
+        self.plan.stats.ref_actif = reference is not None
+        self.plan.stats.kam_actif = kam is not None
         if self.ids is not None:
             # tous les Stores connus : un fichier n'est jamais donne a un Store s'il colle mieux a un autre
-            self.ids.set_known_stores(
-                [e.store for entries in reference.by_store.values() for e in entries]
-                + [r.get("Store") for r in target.rows])
+            refs = [e.store for entries in reference.by_store.values() for e in entries] if reference else []
+            self.ids.set_known_stores(refs + [r.get("Store") for r in target.rows])
 
         self._rows_by_number: dict[int, TargetRow] = {}
         self._rows_by_store: dict[str, list[TargetRow]] = {}
@@ -236,6 +239,11 @@ class Processor:
     # Boucle principale : une ligne du fichier 2 a la fois (regle 17)
     # ------------------------------------------------------------------
     def run(self, progress: Callable[[int, int], None] | None = None) -> Plan:
+        if self.reference is None:
+            self._run_sans_reference(progress)
+            self._signaler_fichiers_id_inutilises()
+            return self.plan
+
         rows = self.target.rows
         total = max(len(rows), 1)
         stores_traites: set[str] = set()
@@ -244,14 +252,7 @@ class Processor:
             self.plan.stats.lignes_analysees += 1
 
             # STEP 1 : Store vide -> ROUGE uniquement, aucun traitement (regle 2)
-            if not trow.get("Store").strip():
-                self.plan.marks.append(RowMark(row=trow.row, reason="Store vide"))
-                self.plan.stats.lignes_store_vide += 1
-                self._decide(
-                    ROUGE, trow.row,
-                    reason="Colonne Store (I) vide : aucune recherche, aucune modification, aucune creation.",
-                    details="Seule action autorisee : coloration de toute la ligne en rouge.",
-                )
+            if self._store_vide(trow):
                 if progress:
                     progress(index, total)
                 continue
@@ -265,11 +266,110 @@ class Processor:
 
         self._decider_lignes_restantes()
         self._verifier_cles_en_double()
+        self._signaler_fichiers_id_inutilises()
+        return self.plan
+
+    # ------------------------------------------------------------------
+    def _store_vide(self, trow: TargetRow) -> bool:
+        """STEP 1 (regle 2) : Store vide -> ROUGE uniquement, aucun traitement."""
+        if trow.get("Store").strip():
+            return False
+        self.plan.marks.append(RowMark(row=trow.row, reason="Store vide"))
+        self.plan.stats.lignes_store_vide += 1
+        self._decide(
+            ROUGE, trow.row,
+            reason="Colonne Store (I) vide : aucune recherche, aucune modification, aucune creation.",
+            details="Seule action autorisee : coloration de toute la ligne en rouge.",
+        )
+        return True
+
+    def _signaler_fichiers_id_inutilises(self) -> None:
         if self.ids is not None:
             for fichier in self.ids.unused():
                 self.log.log(ID_NON_TROUVE, f"Fichier non utilise : {fichier.describe()} -> aucun Store / "
-                                            "Division correspondant dans la Reference et le fichier 2.")
-        return self.plan
+                                            "Division correspondant dans les fichiers choisis.")
+
+    # ------------------------------------------------------------------
+    def _run_sans_reference(self, progress: Callable[[int, int], None] | None) -> None:
+        """Pas de Reference : on ne met a jour QUE les colonnes des fichiers choisis
+        (KAM et/ou IDAYA), ligne par ligne, avec le Store + Division1 de la ligne.
+        Aucune ligne creee, aucune autre colonne touchee."""
+        rows = self.target.rows
+        total = max(len(rows), 1)
+        divisions_par_store: dict[str, set[str]] = {}
+        lignes_par_cle: dict[tuple[str, str], list[TargetRow]] = {}
+        for trow in rows:
+            store_key = norm_store(trow.get("Store"))
+            division = norm_division(trow.get("Division1"))
+            if store_key and division in DIVISIONS_TRAITEES:
+                divisions_par_store.setdefault(store_key, set()).add(division)
+                lignes_par_cle.setdefault((store_key, division), []).append(trow)
+        colonnes = " et ".join(c for c, actif in (("KAM", self.kam is not None),
+                                                   ("IDAYA", self.ids is not None)) if actif)
+
+        for index, trow in enumerate(rows, start=1):
+            self.plan.stats.lignes_analysees += 1
+            if progress:
+                progress(index, total)
+            if self._store_vide(trow):
+                continue
+            store = trow.get("Store").strip()
+            store_key = norm_store(store)
+            division = norm_division(trow.get("Division1"))
+            key = build_key(trow.get("Code Store"), division)
+
+            # Regle 3 : seules VD et DA sont traitees (RAC ou vide -> A VERIFIER)
+            if division not in DIVISIONS_TRAITEES:
+                self._verifier(store, division, key,
+                               f"Division1 '{trow.get('Division1')}' non prevue par les regles (seules VD et DA "
+                               "sont traitees) : ligne laissee intacte.", rows=[trow.row])
+                continue
+            # Jamais de choix au hasard : meme Store + Division sur plusieurs lignes
+            doublons = lignes_par_cle[(store_key, division)]
+            if len(doublons) > 1:
+                self._verifier(store, division, key,
+                               f"{store} + {division} apparait sur {len(doublons)} lignes du fichier 2 "
+                               f"({', '.join(str(t.row) for t in doublons)}) : aucun choix automatique, "
+                               "ligne laissee intacte.", rows=[trow.row])
+                continue
+
+            valeurs: dict[str, str] = {}
+            raisons: list[str] = []
+            if self.kam is not None:
+                valeurs["KAM"], raison = self._chercher_kam(store, division, trow)
+                raisons.append(raison)
+            raison = self._chercher_id([store], division, store,
+                                       divisions_par_store.get(store_key, {division}), valeurs, trow)
+            if raison:
+                raisons.append(raison)
+            self._planifier_update_colonnes(trow, valeurs, store, division, key, colonnes, " ".join(raisons))
+
+    def _planifier_update_colonnes(self, trow: TargetRow, valeurs: dict[str, str], store: str,
+                                   division: str, key: str, colonnes: str, raisons: str) -> None:
+        """Mise a jour de quelques colonnes seulement (mode sans Reference)."""
+        changes: list[CellChange] = []
+        formules: list[str] = []
+        for name, valeur in valeurs.items():
+            if name not in self.target.layout.columns or trow.get(name) == valeur:
+                continue
+            if trow.is_formula(name):
+                formules.append(name)                       # une formule n'est jamais ecrasee
+                continue
+            changes.append(CellChange(column=name, old=trow.get(name), new=valeur))
+        details = raisons + (f" Formule conservee : {', '.join(formules)}." if formules else "")
+        if not changes:
+            self.plan.stats.lignes_conformes += 1
+            self._decide(CONFORME, trow.row, store=store, division=division, key=key,
+                         reason=f"Sans Reference : seules les colonnes {colonnes} sont verifiees ; "
+                                "deja a jour, aucune cellule modifiee.", details=details)
+            return
+        self.plan.updates.append(RowUpdate(row=trow.row, store=store, division=division, key=key,
+                                           changes=changes))
+        self.plan.stats.lignes_modifiees += 1
+        self._decide(MODIFIEE, trow.row, store=store, division=division, key=key,
+                     reason=f"Sans Reference : seules les colonnes {colonnes} sont mises a jour "
+                            f"({len(changes)} cellule(s)), les autres colonnes ne sont pas touchees.",
+                     details=details + " Cellules : " + " ; ".join(c.as_text() for c in changes))
 
     # ------------------------------------------------------------------
     def _traiter_store(self, store_key: str, store_label: str) -> None:
@@ -359,31 +459,15 @@ class Processor:
                          store=store_label, division=division)
             return
 
-        # STEP 7 : KAM cherche avec Store + Division (regle 11)
-        kam_result = self.kam.lookup(store_label or entry.store, division)
-        if kam_result.ok:
-            kam_value = kam_result.kam
-            self.plan.stats.kam_trouves += 1
-            kam_reason = f"KAM '{kam_value}' trouve dans la feuille {division} du fichier 3."
+        # STEP 7 : KAM cherche avec Store + Division (regle 11) - seulement si un fichier KAM est choisi
+        if self.kam is not None:
+            kam_value, kam_reason = self._chercher_kam(store_label or entry.store, division, ligne)
         else:
-            # KAM introuvable : on ne devine rien. Decision explicite de l'utilisateur :
-            # on ecrit le marqueur "#" (placeholder deja utilise dans son fichier),
-            # que la ligne soit existante ou creee.
-            kam_value = KAM_PLACEHOLDER
-            self.plan.stats.kam_non_trouves += 1
-            motif = {
-                NOT_FOUND: "Store absent du fichier 3",
-                WRONG_DIVISION: f"Store absent de la feuille {division} du fichier 3",
-                AMBIGUOUS: "plusieurs KAM differents pour ce Store dans le fichier 3",
-            }.get(kam_result.status, "KAM introuvable")
-            action = f"KAM ecrit comme '{KAM_PLACEHOLDER}'"
-            kam_reason = f"KAM non trouve ({motif}) : {action}."
-            self.log.log(KAM_NON_TROUVE, f"{motif} -> {action}",
-                         row=ligne.row if ligne else None, store=store_label, division=division)
+            kam_value, kam_reason = None, "Pas de fichier KAM choisi : colonne KAM non modifiee."
 
         valeurs = self._valeurs_reference(entry, division, key, kam_value)
-        id_reason = self._chercher_id(entry, division, store_label, divisions_du_store or {division},
-                                      valeurs, ligne)
+        id_reason = self._chercher_id([n for n in (entry.store, store_label) if n], division, store_label,
+                                      divisions_du_store or {division}, valeurs, ligne)
         if id_reason:
             kam_reason += " " + id_reason
 
@@ -394,13 +478,33 @@ class Processor:
         self._keys_traitees.add(key)
 
     # ------------------------------------------------------------------
-    def _chercher_id(self, entry: ReferenceRow, division: str, store_label: str,
+    def _chercher_kam(self, store: str, division: str, ligne: TargetRow | None) -> tuple[str, str]:
+        """KAM du Store + Division dans le fichier 3 : (valeur a ecrire, raison)."""
+        kam_result = self.kam.lookup(store, division)
+        if kam_result.ok:
+            self.plan.stats.kam_trouves += 1
+            return kam_result.kam, f"KAM '{kam_result.kam}' trouve dans la feuille {division} du fichier 3."
+        # KAM introuvable : on ne devine rien. Decision explicite de l'utilisateur :
+        # on ecrit le marqueur "#" (placeholder deja utilise dans son fichier),
+        # que la ligne soit existante ou creee.
+        self.plan.stats.kam_non_trouves += 1
+        motif = {
+            NOT_FOUND: "Store absent du fichier 3",
+            WRONG_DIVISION: f"Store absent de la feuille {division} du fichier 3",
+            AMBIGUOUS: "plusieurs KAM differents pour ce Store dans le fichier 3",
+        }.get(kam_result.status, "KAM introuvable")
+        action = f"KAM ecrit comme '{KAM_PLACEHOLDER}'"
+        self.log.log(KAM_NON_TROUVE, f"{motif} -> {action}",
+                     row=ligne.row if ligne else None, store=store, division=division)
+        return KAM_PLACEHOLDER, f"KAM non trouve ({motif}) : {action}."
+
+    # ------------------------------------------------------------------
+    def _chercher_id(self, noms: list[str], division: str, store_label: str,
                      divisions_du_store: set[str], valeurs: dict[str, str],
                      ligne: TargetRow | None) -> str:
         """IDAYA lu dans le dossier des IDs (nom de fichier 'numero-Store Division')."""
         if self.ids is None:
             return ""
-        noms = [n for n in (entry.store, store_label) if n]
         result = self.ids.lookup(noms, division, divisions_du_store)
         row = ligne.row if ligne else None
         if result.status in (FOUND, APPROX):
@@ -435,9 +539,13 @@ class Processor:
         return choisie
 
     # ------------------------------------------------------------------
-    def _valeurs_reference(self, entry: ReferenceRow, division: str, key: str, kam: str) -> dict[str, str]:
-        """Regles 4, 5 et 12 : ce que la Reference impose dans le fichier 2."""
-        return {
+    def _valeurs_reference(self, entry: ReferenceRow, division: str, key: str,
+                           kam: str | None) -> dict[str, str]:
+        """Regles 4, 5 et 12 : ce que la Reference impose dans le fichier 2.
+
+        kam None = pas de fichier KAM choisi : la colonne KAM n'est pas touchee.
+        """
+        valeurs = {
             "Division": entry.divisions_raw,     # valeur brute de la Reference (VD, DA ou VD+DA)
             "Division1": division,               # division reellement traitee
             "KAM": kam,
@@ -449,6 +557,9 @@ class Processor:
             "DAY": entry.working_days,
             "Column1": key,                      # Code Store + Division1
         }
+        if kam is None:
+            del valeurs["KAM"]
+        return valeurs
 
     # ------------------------------------------------------------------
     def _planifier_update(self, trow: TargetRow, valeurs: dict[str, str], entry: ReferenceRow,
@@ -504,6 +615,11 @@ class Processor:
             complet[name] = valeur
             if not valeur:
                 notes.append(f"{name} laisse vide (absent de la Reference et aucune ligne du meme Code Store)")
+
+        if "KAM" in self.target.layout.columns and "KAM" not in complet:
+            # Pas de fichier KAM : on ne recopie JAMAIS le KAM de la ligne soeur (autre division).
+            complet["KAM"] = KAM_PLACEHOLDER
+            notes.append(f"KAM ecrit comme '{KAM_PLACEHOLDER}' (aucun fichier KAM choisi)")
 
         if "IDAYA" in self.target.layout.columns and not complet.get("IDAYA"):
             if self.options.auto_number_idaya:
