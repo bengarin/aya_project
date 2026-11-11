@@ -58,6 +58,8 @@ class NomDeFichierTest(unittest.TestCase):
             "31_CARREFOUR TANGER_VD_Part1.jpg": ("31", "CARREFOUR TANGER", {"VD"}),
             "30_CARREFOURFES_VD-DA_Part1.jpg": ("30", "CARREFOURFES", {"VD", "DA"}),
             "75_ASWAK-ASSALAM-AGADIR-DAKHLA_DA_Part1 (1).jpg": ("75", "ASWAK ASSALAM AGADIR DAKHLA", {"DA"}),
+            "218ASSWAK ASSALAM HAY RIAD DA.jpg": ("218", "ASSWAK ASSALAM HAY RIAD", {"DA"}),
+            "106_ELECTRO-BOUSFIHA-AL-QODS_VD-DA_Part1 (2).jpg": ("106", "ELECTRO BOUSFIHA AL QODS", {"VD", "DA"}),
         }
         for nom, (numero, store, divisions) in cas.items():
             f = parse_filename(nom)

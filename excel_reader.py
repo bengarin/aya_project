@@ -450,6 +450,7 @@ class KamData:
     layouts: list[SheetLayout]
     entries: list[KamEntry]
     sheet_names: list[str]
+    ignored_sheets: list[str] = field(default_factory=list)
 
 
 def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
@@ -458,7 +459,9 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
     Cas reel important : ce fichier contient une feuille 'VD' et une feuille 'DA'.
     Le KAM depend donc du magasin ET de la division. On memorise la division
     d'apres le nom de la feuille. Si la feuille ne s'appelle ni VD ni DA, elle est
-    consideree comme "generique" (valable pour toutes les divisions).
+    consideree comme "generique" (valable pour toutes les divisions)... SEULEMENT si
+    le fichier n'a aucune feuille VD / DA. Sinon elle est ignoree (ex. 'DA Aya') :
+    elle donnerait un KAM DA a une ligne VD.
     """
     path = Path(path)
     wb = load_workbook(path, data_only=True, read_only=False)
@@ -480,6 +483,10 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
                 "Fichier 3 - Affectation KAM : aucune feuille avec les colonnes obligatoires "
                 f"({', '.join(KAM_SPEC.required)}). Manquantes : {', '.join(missing)}"
             )
+        ignored: list[str] = []
+        if sheets is None and any(norm_division(l.title) in ("VD", "DA") for l in usable):
+            ignored = [l.title for l in usable if norm_division(l.title) not in ("VD", "DA")]
+            usable = [l for l in usable if norm_division(l.title) in ("VD", "DA")]
         entries: list[KamEntry] = []
         for layout in usable:
             ws = wb[layout.title]
@@ -502,7 +509,8 @@ def load_kam(path: str | Path, sheets: list[str] | None = None) -> KamData:
                         source_row=r,
                     )
                 )
-        return KamData(path=path, layouts=usable, entries=entries, sheet_names=sheet_names)
+        return KamData(path=path, layouts=usable, entries=entries, sheet_names=sheet_names,
+                       ignored_sheets=ignored)
     finally:
         wb.close()
 

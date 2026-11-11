@@ -18,6 +18,7 @@ import excel_reader as reader
 from excel_reader import ExcelReadError, ReferenceData, TargetData
 from excel_writer import ExcelWriteError, WriteResult, apply_plan, suggest_output_path
 from id_service import IdService
+from version import APP_NAME, CREDIT_ASCII, VERSION
 from kam_service import KamService
 from logger import ProcessLogger
 from processor import Options, Plan, Processor
@@ -131,6 +132,12 @@ class Session:
                 "Elements du fichier 2 non recopiables par openpyxl (ils seront absents du resultat) : "
                 + ", ".join(lost) + ". Les donnees, formules, couleurs, tableaux et filtres sont conserves."
             )
+        if kam.data.ignored_sheets:
+            warnings.append(
+                "Fichier 3 : feuille(s) ignoree(s) : "
+                + ", ".join(f"'{t}'" for t in kam.data.ignored_sheets)
+                + " (le KAM est lu uniquement dans les feuilles VD et DA, Store + Division)."
+            )
         if not kam.divisions:
             warnings.append(
                 "Le fichier 3 ne contient aucune feuille 'VD' / 'DA' : le KAM ne peut pas etre "
@@ -222,6 +229,7 @@ class Session:
     def report_header(self, result: WriteResult | None = None) -> str:
         lines = [
             "AUTOMATISATION EXCEL - AYA",
+            f"Logiciel                             : {APP_NAME} {VERSION} - {CREDIT_ASCII}",
             f"Fichier 1 (Reference, lecture seule) : {self.selection.reference}",
             f"Fichier 2 (BDD a traiter)            : {self.selection.target}",
             f"Fichier 3 (Affectation KAM)          : {self.selection.kam}",

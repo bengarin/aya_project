@@ -45,7 +45,7 @@ APPROX = "APPROX"
 NOT_FOUND = "NOT_FOUND"
 AMBIGUOUS = "AMBIGUOUS"
 
-_NOM_RE = re.compile(r"^\s*(\d+)\s*[-_ .]\s*(.+?)\s*$")
+_NOM_RE = re.compile(r"^\s*(\d+)\s*(?:[-_ .]\s*)?([^\W\d_].*?|[-_ .].+?)\s*$")   # "218ASSWAK..." accepte
 _COPIE_RE = re.compile(r"\s*\(\d+\)\s*$")                                   # "nom (1)" (copie Windows)
 _PART_RE = re.compile(r"[\s_\-.]*(?:part|partie|page)\s*\d+\s*$", re.IGNORECASE)
 _DIV_RE = re.compile(r"(?:^|[\s\-_.])((?:VD|DA)(?:\s*[+&/,\-_]\s*(?:VD|DA))*)$", re.IGNORECASE)

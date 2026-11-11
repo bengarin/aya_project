@@ -65,6 +65,8 @@ en silence. La lecture par position n'est utilisee que si les en-tetes sont illi
 | Annee | Mois | Division | Division1 | KAM | ID Promoter | Code Store | Promoter | Store | City | STATUT | DAY | IDAYA | Column1 |
 
 **Fichier 3 - Affectation KAM** - une feuille `VD` et une feuille `DA` (colonnes Store et KAM).
+Les autres feuilles (ex. `DA Aya`) sont **ignorees** et signalees : le KAM est lu uniquement
+par Store + Division dans `VD` et `DA`. Le rapport indique la version du logiciel utilisee.
 
 ---
 
@@ -264,7 +266,7 @@ build_windows.ps1  construction Windows en une commande (voir DISTRIBUTION.md)
 python -m unittest discover -s tests -v
 ```
 
-64 tests (37 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
+66 tests (39 regles metier + 23 dossier des IDs + 4 emplacements config/journal), dont les **10 cas obligatoires** :
 Store vide - Store non trouve - Store+VD existant - Store+DA existant -
 VD existant mais DA absent - VD+DA - meme Store + meme Division avec 2 promoteurs -
 KAM different entre VD et DA - Column1 incorrect - deuxieme execution sans duplicate.

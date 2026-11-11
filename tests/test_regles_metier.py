@@ -335,6 +335,39 @@ class TestFichiers(BaseCase):
         self.assertIn("Enseigne XYZ", message)
         self.assertFalse(self.output.exists())
 
+    def test_feuille_kam_en_plus_ignoree(self):
+        """'DA Aya' a cote de VD et DA : jamais utilisee (elle donnerait un KAM DA a une ligne VD)."""
+        wb = openpyxl.load_workbook(self.files["kam"])
+        ws = wb.create_sheet("DA Aya")
+        for col, value in enumerate(["CITY", "Code store", "Store", "KAM"], start=1):
+            ws.cell(1, col, value)
+        for col, value in enumerate(["Safi", "C600", "Store NoKam", "KAM PIEGE"], start=1):
+            ws.cell(2, col, value)
+        avec_feuille = self.folder / "KAM_3_FEUILLES.xlsx"
+        wb.save(avec_feuille)
+        self.files["kam"] = avec_feuille
+        session = Session(Selection(reference=self.files["reference"], target=self.files["target"],
+                                    kam=avec_feuille))
+        try:
+            data = session.load()
+            session.analyze()
+            session.apply(self.output, write_report=False)
+        finally:
+            session.close()
+        self.assertTrue(any("'DA Aya'" in w for w in data.warnings))
+        self.assertEqual(self.cell(self.sheet(), L_SANS_KAM, "KAM"), "#")
+
+    def test_rapport_indique_la_version(self):
+        from version import VERSION
+        session = Session(Selection(reference=self.files["reference"], target=self.files["target"],
+                                    kam=self.files["kam"]))
+        try:
+            session.load()
+            session.analyze()
+            self.assertIn(f"{VERSION} - Developpe par", session.report_header())
+        finally:
+            session.close()
+
     def test_sources_jamais_modifiees(self):
         self.run_pipeline()
         for name, path in self.files.items():
